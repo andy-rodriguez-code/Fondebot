@@ -622,7 +622,9 @@ class PortalInvitation(Base):
         ForeignKey("departments.id", ondelete="CASCADE"), nullable=True, index=True
     )
     email: Mapped[str] = mapped_column(String(320))
-    name: Mapped[str] = mapped_column(String(160), default="")
+    # server_default además del default de Python, igual que en la migración
+    # 0028: sin él, un INSERT que no pase por el ORM deja la columna en NULL.
+    name: Mapped[str] = mapped_column(String(160), default="", server_default="")
     token_hash: Mapped[str] = mapped_column(String(64))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

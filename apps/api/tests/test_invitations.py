@@ -582,7 +582,9 @@ def test_an_admin_cannot_invite_into_another_agencys_client(client: TestClient, 
         json={"name": "Ajena", "agent_id": agent["id"], "invite_email": "objetivo@example.com"},
     )
 
-    assert intruder.status_code == 404
+    # With the body: a mistyped URL also returns 404, and would read as a pass.
+    assert intruder.status_code == 404, intruder.text
+    assert intruder.json()["detail"] == "Client not found"
     with SessionLocal() as db:
         assert db.query(PortalInvitation).count() == 0
 
@@ -663,3 +665,34 @@ def test_a_user_created_by_accepting_only_sees_their_own_department(authenticate
     assert portal.post(f"/api/portal/{slug}/login", json={"email": "mia@example.com", "password": chosen}).status_code == 200
     titles = [row["title"] for row in portal.get(f"/api/portal/{slug}/conversations").json()]
     assert titles == ["Caso mío"]
+
+
+def test_accepting_after_the_address_became_a_member_is_a_dead_link_not_a_500(authenticated_client: TestClient):
+    """The collision happens where the invitation is redeemed, not issued.
+
+    Widening the guard on department creation and on resend closed the two
+    doors where an invitation is *issued*. This is the third: between issuing
+    and accepting there are up to 24 hours, and neither create_portal_user nor
+    update_portal_user looks at pending invitations. An admin who invites,
+    grows impatient and creates the account by hand leaves a live link whose
+    INSERT hits uq_portal_users_client_email — a 500 on a public route.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="impaciente@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    created = client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "impaciente@example.com", "password": PASSWORD, "name": "Impaciente"},
+    )
+    assert created.status_code == 201, created.text
+
+    dead = _accept(client, customer["portal_slug"], token)
+    assert dead.status_code == 400, dead.text
+    # The same body as any other dead link: a valid token whose address was
+    # taken must not be distinguishable from one that never existed.
+    assert dead.json() == {"detail": INVITATION_INVALID_DETAIL}
+    with SessionLocal() as db:
+        assert db.query(PortalUser).filter(PortalUser.email == "impaciente@example.com").count() == 1
