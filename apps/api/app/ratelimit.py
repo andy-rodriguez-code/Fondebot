@@ -106,3 +106,6 @@ public_asset_rate_limit = RateLimiter(60, 60, name="public-asset")
 # El webhook de Meta se autentica con su firma HMAC; este límite generoso solo
 # protege contra avalanchas de tráfico sin firmar.
 whatsapp_cloud_webhook_rate_limit = RateLimiter(300, 60, name="whatsapp-cloud-webhook")
+# Mismos números que login_rate_limit: aceptar una invitación es otro endpoint
+# público sin autenticar, con la misma defensa contra fuerza bruta de tokens.
+invitation_rate_limit = RateLimiter(10, 60, name="invitation")

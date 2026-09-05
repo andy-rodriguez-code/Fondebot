@@ -13,14 +13,18 @@ exactly its real departments as buttons.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from ..config import get_settings
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Agent, Client, Department, User, now_utc
+from ..models import Agent, Client, Department, PortalInvitation, PortalUser, User, now_utc
+from ..schemas import InvitationOut
 from ..schemas_departments import DepartmentIn, DepartmentOut, DepartmentUpdate
+from ..services.emails import build_invitation_email, email_enabled
+from ..services.invitations import issue_invitation, send_invitation_email
 from ..slugs import slugify
 
 
@@ -79,6 +83,57 @@ def _out(department: Department) -> DepartmentOut:
     return data
 
 
+def _assert_no_active_portal_user(db: Session, client: Client, email: str) -> None:
+    """Espejo del chequeo de ``create_portal_user`` (Spec: Duplicate Portal-User
+    Handling). Solo bloquea contra un miembro ACTIVO del MISMO cliente: la
+    misma dirección en otro cliente está permitida, porque el índice único de
+    ``portal_users`` es por cliente."""
+    existing = db.scalar(
+        select(PortalUser.id).where(
+            PortalUser.client_id == client.id, PortalUser.email == email, PortalUser.is_active.is_(True)
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="That e-mail is already on this portal")
+
+
+def _accept_url(client: Client, raw_token: str) -> str:
+    return f"{get_settings().frontend_url}/portal/{client.portal_slug}/invite?token={raw_token}"
+
+
+def _invitation_out(invitation: PortalInvitation, raw_token: str, client: Client) -> InvitationOut:
+    # "failed" solo lo agrega la lectura de list_departments (PR4), una vez que
+    # el envío en segundo plano tuvo tiempo de correr y fallar; acá, recién
+    # creada, es "sent" o "manual".
+    delivery = "sent" if email_enabled() else "manual"
+    return InvitationOut(
+        id=invitation.id,
+        email=invitation.email,
+        expires_at=invitation.expires_at,
+        delivery=delivery,
+        accept_url=None if email_enabled() else _accept_url(client, raw_token),
+    )
+
+
+def _queue_invitation_email(
+    background_tasks: BackgroundTasks,
+    client: Client,
+    department: Department | None,
+    invitation: PortalInvitation,
+    raw_token: str,
+) -> None:
+    """Encola el envío para después de confirmar la transacción.
+
+    ``BackgroundTasks`` corre esta llamada en un hilo de threadpool, nunca en
+    el event loop (Constraint: smtplib async ban) — ver
+    ``services/emails.py`` y ``send_invitation_email``.
+    """
+    if not email_enabled():
+        return
+    email = build_invitation_email(invitation.email, client, department, _accept_url(client, raw_token))
+    background_tasks.add_task(send_invitation_email, email)
+
+
 @router.get("", response_model=list[DepartmentOut])
 def list_departments(
     client_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)
@@ -97,11 +152,15 @@ def list_departments(
 def create_department(
     client_id: uuid.UUID,
     payload: DepartmentIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     client = _client(db, user, client_id)
     _validate_agent(db, client, payload.agent_id)
+    invite_email = payload.invite_email.lower() if payload.invite_email else None
+    if invite_email:
+        _assert_no_active_portal_user(db, client, invite_email)
     is_first = not db.scalar(select(Department.id).where(Department.client_id == client.id))
     department = Department(
         client_id=client.id,
@@ -118,9 +177,60 @@ def create_department(
     if department.is_entry:
         _clear_other_entries(db, client, None)
     db.add(department)
+    db.flush()
+
+    invitation, raw_token = (None, None)
+    if invite_email:
+        # Dependencia + invitación en una sola transacción (Spec: Optional
+        # Invitation On Department Creation); el envío recién se encola
+        # después de que ambas quedan confirmadas.
+        invitation, raw_token = issue_invitation(
+            db, client=client, email=invite_email, department_id=department.id,
+            name=payload.invite_name, invited_by=user.id,
+        )
     db.commit()
     db.refresh(department)
-    return _out(department)
+
+    out = _out(department)
+    if invitation is not None:
+        db.refresh(invitation)
+        _queue_invitation_email(background_tasks, client, department, invitation, raw_token)
+        out = out.model_copy(update={"invitation": _invitation_out(invitation, raw_token, client)})
+    return out
+
+
+@router.post(
+    "/{department_id}/invitations", response_model=InvitationOut, status_code=status.HTTP_201_CREATED
+)
+def resend_invitation(
+    client_id: uuid.UUID,
+    department_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Reenvía la invitación pendiente de esta dependencia (Spec: Invitation
+    Re-send). Reusa el mail que ya estaba en la fila pendiente: reenviar no
+    es invitar a alguien distinto, es volver a mandar el mismo link."""
+    client = _client(db, user, client_id)
+    department = _department(db, client, department_id)
+    pending = db.scalar(
+        select(PortalInvitation).where(
+            PortalInvitation.client_id == client.id,
+            PortalInvitation.department_id == department.id,
+            PortalInvitation.accepted_at.is_(None),
+        )
+    )
+    if not pending:
+        raise HTTPException(status_code=404, detail="This department has no pending invitation to resend")
+    invitation, raw_token = issue_invitation(
+        db, client=client, email=pending.email, department_id=department.id,
+        name=pending.name, invited_by=user.id,
+    )
+    db.commit()
+    db.refresh(invitation)
+    _queue_invitation_email(background_tasks, client, department, invitation, raw_token)
+    return _invitation_out(invitation, raw_token, client)
 
 
 @router.patch("/{department_id}", response_model=DepartmentOut)
