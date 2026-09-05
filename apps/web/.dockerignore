@@ -5,3 +5,11 @@ out/
 .env.*
 npm-debug.log*
 .turbo
+
+# Tests stay out of the image. `next build` type-checks everything it can see,
+# and the test runner is a dev-only dependency that production never installs,
+# so a test file inside the build context fails the build on an unresolved
+# import of "vitest". CI checks these separately, where the runner exists.
+**/*.test.ts
+**/*.test.tsx
+vitest.config.ts
