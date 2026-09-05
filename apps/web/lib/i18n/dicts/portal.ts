@@ -33,6 +33,15 @@ const en = {
       security: "Private access managed by {name}.",
     },
   },
+  invite: {
+    cardLabel: "Pending invitation",
+    welcome: "Welcome to {name}",
+    subtitle: "Set a password to sign in to the client portal.",
+    passwordLabel: "Password",
+    passwordPlaceholder: "At least 8 characters",
+    submit: "Create my access",
+    missingToken: "This invitation link is missing its token.",
+  },
   templates: {
     intro: "Approved templates are the only way to write to someone first, or after 24 hours without a reply from them. Meta reviews each one.",
     new: "New template",
@@ -216,6 +225,15 @@ const es: typeof en = {
       submit: "Entrar al Inbox",
       security: "Acceso privado administrado por {name}.",
     },
+  },
+  invite: {
+    cardLabel: "Invitación pendiente",
+    welcome: "Bienvenido a {name}",
+    subtitle: "Elegí una contraseña para entrar al portal del cliente.",
+    passwordLabel: "Contraseña",
+    passwordPlaceholder: "Al menos 8 caracteres",
+    submit: "Crear mi acceso",
+    missingToken: "A este enlace de invitación le falta el token.",
   },
   templates: {
     intro: "Las plantillas aprobadas son la única forma de escribirle primero a alguien, o después de 24 horas sin respuesta. Meta revisa cada una.",

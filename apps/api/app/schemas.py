@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -495,6 +495,23 @@ class PortalLoginRequest(BaseModel):
 class PortalInvitationAccept(BaseModel):
     token: str = Field(min_length=1)
     password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def _fits_bcrypt(cls, value: str) -> str:
+        """bcrypt rechaza cualquier entrada de más de 72 bytes con ValueError.
+
+        Sin este chequeo, ``hash_password`` —que corre como primera línea del
+        handler, antes de mirar el token— convierte una contraseña larga en un
+        500 en un endpoint público y sin autenticar. Se valida en bytes y no en
+        caracteres porque una tilde ocupa dos.
+
+        No filtra nada: el rechazo depende solo del largo de la contraseña, que
+        quien la escribió ya conoce, nunca de si el token existe.
+        """
+        if len(value.encode()) > 72:
+            raise ValueError("The password must be at most 72 bytes long")
+        return value
 
 
 class PortalPublicOut(BaseModel):

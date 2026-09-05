@@ -397,6 +397,27 @@ def test_accept_returns_the_same_body_for_unknown_expired_and_burned_tokens(auth
         assert response.json() == {"detail": INVITATION_INVALID_DETAIL}
 
 
+def test_accept_rejects_an_overlong_password_instead_of_crashing(authenticated_client: TestClient):
+    """bcrypt raises above 72 bytes, and hashing runs before the token check.
+
+    Without the schema guard, a long password reaches `hash_password` as the
+    first statement of a public, unauthenticated handler and becomes a 500 —
+    whatever the token was. 422 is the honest answer, and rejecting on length
+    alone leaks nothing the sender did not already know.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+
+    # Accented characters are two bytes each: 40 of them exceed 72 bytes while
+    # staying well under the 128-character cap.
+    long_password = "á" * 40
+    assert len(long_password) < 128
+    assert len(long_password.encode()) > 72
+
+    response = _accept(client, customer["portal_slug"], "cualquier-token", password=long_password)
+    assert response.status_code == 422
+
+
 def test_accept_rejects_a_token_from_another_portal_slug(authenticated_client: TestClient):
     client = authenticated_client
     customer_a = _make_client(client, "Cliente A")
