@@ -599,6 +599,22 @@ class PortalInvitation(Base):
     """
 
     __tablename__ = "portal_invitations"
+    # Espejo de los índices de la migración 0028. Sin esto, la suite —que arma
+    # el esquema con ``Base.metadata.create_all``— corre contra una tabla sin
+    # ninguna de las dos garantías, y un defecto que la base rechazaría en
+    # producción pasa en verde. Las dos son estructurales, no convenciones:
+    # el hash es único, y solo puede existir una invitación PENDIENTE por
+    # cliente y dirección (las aceptadas quedan como rastro y se excluyen).
+    __table_args__ = (
+        Index("uq_portal_invitations_token_hash", "token_hash", unique=True),
+        Index(
+            "uq_portal_invitations_client_email_pending",
+            "client_id",
+            "email",
+            unique=True,
+            postgresql_where=text("accepted_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
