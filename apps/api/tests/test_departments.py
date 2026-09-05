@@ -120,8 +120,17 @@ def _setup(client: TestClient) -> dict:
         )
         assert created.status_code == 201, created.text
         departments[name] = created.json()
-    customer = client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True}).json()
+    # The portal is not enabled here: `update_client_portal` refuses to publish
+    # a portal nobody can sign in to (clients.py:148), so the tests that need it
+    # enable it themselves once they have created a portal user.
+    customer = client.get(f"/api/clients/{customer['id']}").json()
     return {"customer": customer, "agents": agents, "channel": channel, "departments": departments}
+
+
+def _enable_portal(client: TestClient, customer_id: str) -> dict:
+    published = client.patch(f"/api/clients/{customer_id}/portal", json={"portal_enabled": True})
+    assert published.status_code == 200, published.text
+    return published.json()
 
 
 def _conversation(client: TestClient) -> dict:
@@ -357,6 +366,7 @@ def test_a_person_only_sees_their_own_department(authenticated_client: TestClien
     )
     assert created.status_code == 201, created.text
     assert created.json()["department_name"] == "Tesorería"
+    customer = _enable_portal(client, customer["id"])
 
     _quiet_channel(monkeypatch)
     _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
@@ -381,6 +391,7 @@ def test_a_person_without_a_department_sees_everything(authenticated_client: Tes
         f"/api/clients/{customer['id']}/portal-users",
         json={"email": "jefa@fondo.com", "password": PASSWORD, "name": "Jefa"},
     )
+    customer = _enable_portal(client, customer["id"])
 
     _quiet_channel(monkeypatch)
     _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
@@ -409,6 +420,7 @@ def test_members_and_assignment_stay_inside_the_department(authenticated_client:
                 "department_id": setup["departments"][department]["id"],
             },
         )
+    customer = _enable_portal(client, customer["id"])
 
     _quiet_channel(monkeypatch)
     _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
