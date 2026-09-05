@@ -60,7 +60,9 @@ describe("api", () => {
 
   it("cae a un mensaje genérico cuando el cuerpo del error no es json", async () => {
     stubFetch(new Response("<html>502</html>", { status: 502 }));
-    const error = await api("/departments").catch((err: unknown) => err as ApiError);
+    // The cast goes outside the catch: api() resolves to unknown, so a callback
+    // returning ApiError widens back to `unknown | ApiError` — which is unknown.
+    const error = (await api("/departments").catch((err: unknown) => err)) as ApiError;
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(502);
     expect(error.message).toBeTruthy();

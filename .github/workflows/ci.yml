@@ -85,12 +85,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
 
-      # `npm install` rather than `npm ci`: package-lock.json predates the test
-      # runner added with this workflow and cannot be regenerated from a machine
-      # without node_modules. Switch to `npm ci` once the lockfile is committed.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
+
+      # Installed here rather than declared in package.json on purpose. The
+      # image build runs `npm ci` (apps/web/Dockerfile:5), which fails when
+      # package.json and package-lock.json disagree, and the lockfile cannot be
+      # regenerated from a machine with no node_modules. TO FIX PROPERLY: run
+      # `npm install -D vitest` once locally, commit the refreshed lockfile, and
+      # delete this step.
+      - name: Install the test runner
+        run: npm install --no-save --no-audit --no-fund vitest@3.2.4
 
       - name: Lint
         run: npm run lint
