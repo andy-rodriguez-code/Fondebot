@@ -288,9 +288,24 @@ def test_accept_creates_portal_user_scoped_to_the_department(authenticated_clien
 
 
 def test_accept_sets_the_portal_cookie_and_returns_a_session(authenticated_client: TestClient):
+    """The session an accept hands back only opens a portal that is published.
+
+    So this models inviting the *second* person: a portal cannot be published
+    until it has someone who can sign in, and that first someone is created by
+    accepting an invitation. Asserting a working session on a client whose
+    portal was never enabled would be asserting something the product does not
+    promise — `_portal_client` refuses an unpublished portal, and rightly so.
+    """
     client = authenticated_client
     customer = _make_client(client)
     agent = _make_agent(client, customer["id"])
+    client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "primera@example.com", "password": PASSWORD, "name": "Primera"},
+    )
+    published = client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True})
+    assert published.status_code == 200, published.text
+
     department = _department_with_invite(client, customer["id"], agent["id"], invite_email="sesion@example.com")
     token = _token_from_accept_url(department["invitation"]["accept_url"])
 
@@ -302,6 +317,29 @@ def test_accept_sets_the_portal_cookie_and_returns_a_session(authenticated_clien
     me = client.get(f"/api/portal/{customer['portal_slug']}/me")
     assert me.status_code == 200
     assert me.json()["user_id"] == accepted.json()["user_id"]
+
+
+def test_accept_works_before_the_portal_is_published(authenticated_client: TestClient):
+    """The first person in has to be able to accept, or nothing ever starts.
+
+    Publishing a portal requires an active user and the only way to get one is
+    to accept an invitation, so requiring a published portal here would
+    deadlock the whole flow. The account is created and the invitation burned;
+    the session it returns simply opens nothing until an admin publishes.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="primera@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    assert _accept(client, customer["portal_slug"], token).status_code == 200
+    with SessionLocal() as db:
+        assert db.query(PortalUser).filter(PortalUser.email == "primera@example.com").one().is_active is True
+
+    # And now the portal can be published, which it could not be a moment ago.
+    published = client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True})
+    assert published.status_code == 200, published.text
 
 
 def test_accept_is_single_use(authenticated_client: TestClient):
