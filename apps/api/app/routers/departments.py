@@ -77,9 +77,11 @@ def _clear_other_entries(db: Session, client: Client, keep_id: uuid.UUID | None)
     db.flush()
 
 
-def _out(department: Department) -> DepartmentOut:
+def _out(department: Department, invitation: PortalInvitation | None = None) -> DepartmentOut:
     data = DepartmentOut.model_validate(department)
     data.agent_name = department.agent.name if department.agent else None
+    if invitation is not None:
+        data.invitation = _read_invitation_out(invitation)
     return data
 
 
@@ -102,9 +104,9 @@ def _accept_url(client: Client, raw_token: str) -> str:
 
 
 def _invitation_out(invitation: PortalInvitation, raw_token: str, client: Client) -> InvitationOut:
-    # "failed" solo lo agrega la lectura de list_departments (PR4), una vez que
-    # el envío en segundo plano tuvo tiempo de correr y fallar; acá, recién
-    # creada, es "sent" o "manual".
+    # "failed" solo lo agrega la lectura de list_departments (ver
+    # _read_invitation_out), una vez que el envío en segundo plano tuvo tiempo
+    # de correr y fallar; acá, recién creada o reenviada, es "sent" o "manual".
     delivery = "sent" if email_enabled() else "manual"
     return InvitationOut(
         id=invitation.id,
@@ -113,6 +115,58 @@ def _invitation_out(invitation: PortalInvitation, raw_token: str, client: Client
         delivery=delivery,
         accept_url=None if email_enabled() else _accept_url(client, raw_token),
     )
+
+
+def _read_invitation_out(invitation: PortalInvitation) -> InvitationOut:
+    """Serializa una invitación pendiente para una LECTURA (``list_departments``).
+
+    A diferencia de ``_invitation_out`` (creación/reenvío), acá no hay token
+    crudo disponible — nunca se guarda (D1/D2) — así que ``accept_url`` queda
+    siempre en ``None``: no hay forma de reconstruir el link, y devolverlo en
+    un endpoint de listado tampoco sería correcto. ``delivery`` refleja lo que
+    de verdad pasó en el envío en segundo plano (D7), no la promesa optimista
+    del momento de la creación.
+    """
+    if invitation.delivery_error:
+        delivery = "failed"
+    elif invitation.delivered_at is not None:
+        delivery = "sent"
+    else:
+        # Todavía no corrió (o no hay proveedor) el envío en segundo plano:
+        # misma regla optimista que al crear.
+        delivery = "sent" if email_enabled() else "manual"
+    return InvitationOut(
+        id=invitation.id,
+        email=invitation.email,
+        expires_at=invitation.expires_at,
+        delivery=delivery,
+        accept_url=None,
+    )
+
+
+def _pending_invitations_by_department(
+    db: Session, client: Client, department_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, PortalInvitation]:
+    """La invitación pendiente más reciente de cada dependencia, en una sola
+    consulta (evita N+1 en ``list_departments``). El caso normal tiene a lo
+    sumo una fila pendiente por dependencia; nada en el esquema lo impide
+    (la unicidad es por cliente+mail, no por dependencia), así que si llegara
+    a haber más de una esto se queda con la más nueva."""
+    if not department_ids:
+        return {}
+    rows = db.scalars(
+        select(PortalInvitation)
+        .where(
+            PortalInvitation.client_id == client.id,
+            PortalInvitation.department_id.in_(department_ids),
+            PortalInvitation.accepted_at.is_(None),
+        )
+        .order_by(PortalInvitation.created_at.desc())
+    ).all()
+    latest: dict[uuid.UUID, PortalInvitation] = {}
+    for row in rows:
+        latest.setdefault(row.department_id, row)
+    return latest
 
 
 def _queue_invitation_email(
@@ -131,7 +185,7 @@ def _queue_invitation_email(
     if not email_enabled():
         return
     email = build_invitation_email(invitation.email, client, department, _accept_url(client, raw_token))
-    background_tasks.add_task(send_invitation_email, email)
+    background_tasks.add_task(send_invitation_email, invitation.id, email)
 
 
 @router.get("", response_model=list[DepartmentOut])
@@ -145,7 +199,8 @@ def list_departments(
         .where(Department.client_id == client.id)
         .order_by(Department.position, Department.name)
     ).all()
-    return [_out(row) for row in rows]
+    pending_by_department = _pending_invitations_by_department(db, client, [row.id for row in rows])
+    return [_out(row, pending_by_department.get(row.id)) for row in rows]
 
 
 @router.post("", response_model=DepartmentOut, status_code=status.HTTP_201_CREATED)
