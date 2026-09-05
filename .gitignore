@@ -1,0 +1,43 @@
+.env*
+!.env.example
+!.env.docker.example
+*.pem
+*.key
+*.dump
+*.sqlite*
+work/
+backups/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+apps/api/storage/*
+!apps/api/storage/.gitkeep
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
+apps/whatsapp/node_modules/
+apps/mobile/node_modules/
+apps/mobile/ios/
+apps/mobile/android/
+apps/mobile/.expo/
+apps/whatsapp/dist/
+.DS_Store
+*.log
+.playwright-mcp/
+
+# Local tool indexes — rebuilt per clone, never committed
+.codegraph/
+.atl/
+
+# Local-only notes / internal docs — never committed
+*.local.md
+internal/
+# Security audit: names unfixed vulnerabilities with file and line, and this
+# repository is public. Keep it out of the tree until the findings are closed.
+AUDITORIA.md
+
+# Local-only Claude context (never committed)
+CLAUDE.local.md
