@@ -554,8 +554,8 @@ def test_resending_after_the_address_became_a_member_is_refused(authenticated_cl
         json={"email": "doble@example.com", "password": PASSWORD, "name": "Doble"},
     )
 
-    resent = client.post(f"/api/clients/{customer['id']}/departments/{department['id']}/invitations/resend")
-    assert resent.status_code == 409
+    resent = client.post(f"/api/clients/{customer['id']}/departments/{department['id']}/invitations")
+    assert resent.status_code == 409, resent.text
 
 
 def test_an_admin_cannot_invite_into_another_agencys_client(client: TestClient, monkeypatch):
