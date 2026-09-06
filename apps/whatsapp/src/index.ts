@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 try { loadEnvFile(resolve(process.cwd(), "../.env")); } catch {}
 
-const [{ bridgeToken }, manager] = await Promise.all([
+const [{ tokenMatches }, manager] = await Promise.all([
   import("./api.js"),
   import("./manager.js"),
 ]);
@@ -38,7 +38,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
     if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { status: "ok" });
-    if (request.headers["x-bridge-token"] !== bridgeToken) return json(response, 401, { error: "Invalid internal token" });
+    if (!tokenMatches(request.headers["x-bridge-token"])) return json(response, 401, { error: "Invalid internal token" });
     const match = url.pathname.match(/^\/channels\/([0-9a-f-]+)\/(connect|disconnect|send)$/i);
     if (!match) return json(response, 404, { error: "Route not found" });
     const channelId = match[1]!;
@@ -70,8 +70,12 @@ const server = createServer(async (request, response) => {
     const externalMessageId = await manager.sendMessage(channelId, payload.remote_jid, text, media);
     return json(response, 200, { external_message_id: externalMessageId });
   } catch (error) {
+    // El detalle va al log, no a la respuesta: el mensaje de una excepción de
+    // Baileys o de la base puede traer rutas, estado de sesión o el motivo de
+    // una conexión fallida. Quien llama es el backend, que no necesita nada de
+    // eso para reintentar.
     console.error("[WhatsApp] Operation error:", (error as Error).message);
-    return json(response, 500, { error: (error as Error).message });
+    return json(response, 500, { error: "Internal error" });
   }
 });
 
