@@ -152,7 +152,14 @@ app.add_middleware(
 
 
 @app.get("/health", tags=["System"])
-def health():
+def liveness():
+    """Liveness: responde mientras el proceso esté vivo y NO toca la base.
+
+    Se llama ``liveness`` y no ``health`` porque este módulo importa el router
+    ``health``: una función con ese nombre lo pisaba, y ``health.router``
+    pasaba a buscar un atributo en una función. La ruta sigue siendo
+    ``/health``, que es lo que golpea el healthcheck de docker-compose.
+    """
     return {"status": "ok"}
 
 
