@@ -34,3 +34,30 @@ def test_get_settings_accepts_real_secrets(monkeypatch):
         monkeypatch.setenv(name.upper(), f"a-real-value-for-{name}")
     settings = config.get_settings()
     assert settings.secret_key == "a-real-value-for-secret_key"
+
+
+def test_email_settings_default_to_no_provider():
+    settings = config.get_settings()
+    assert settings.email_provider == "none"
+    assert settings.smtp_password == ""
+    assert settings.invitation_token_minutes == 1440
+
+
+def test_smtp_password_empty_default_does_not_trip_the_insecure_guard():
+    # smtp_password legitimately ships as "" on every install that does not
+    # configure e-mail. Listing it in INSECURE_VALUES would hard-fail the
+    # default configuration, which is exactly what it must not do.
+    assert "smtp_password" not in config.INSECURE_VALUES
+    settings = config.get_settings()
+    assert settings.smtp_password == ""
+
+
+def test_error_log_settings_default_to_thirty_days_and_five_thousand_rows():
+    settings = config.get_settings()
+    assert settings.error_log_retention_days == 30
+    assert settings.error_log_max_rows == 5000
+    # Ninguno de los dos es un secreto de relleno publicado: una instalación
+    # por defecto tiene que poder arrancar sin generar valores propios para
+    # estos dos.
+    assert "error_log_retention_days" not in config.INSECURE_VALUES
+    assert "error_log_max_rows" not in config.INSECURE_VALUES

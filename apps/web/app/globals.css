@@ -277,6 +277,8 @@ textarea { line-height: 1.55; }
 .data-table td { height: 72px; padding: 11px 18px; color: #50586a; border-bottom: 1px solid #edf0f3; font-size: 14px; }
 .data-table tr:last-child td { border-bottom: 0; }
 .data-table tbody tr:hover { background: #fbfcfe; }
+.data-table td:has(details) { height: auto; }
+.data-table pre { max-width: 480px; max-height: 240px; margin: 8px 0 0; padding: 10px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: #f7f8fa; border-radius: 6px; font-size: 12px; }
 .entity-cell { min-width: 220px; display: flex; align-items: center; gap: 12px; }
 .entity-cell > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .entity-cell strong { color: #202638; font-size: 14px; font-weight: 600; }
@@ -1416,3 +1418,35 @@ p .msg-time, .bubble .msg-time { float: none; position: absolute; right: 11px; b
 /* Timestamp inside widget chat bubbles */
 .widget-bubble:has(> .msg-time) { position: relative; padding-right: 48px; }
 .widget-bubble .msg-time { position: absolute; right: 9px; bottom: 6px; font-size: var(--text-xs); line-height: 1; color: inherit; opacity: .5; font-variant-numeric: tabular-nums; }
+
+/* Tablero de conversaciones del portal. Tres columnas fijas: la IA responde,
+   en curso, terminadas. La última solo recibe — una conversación terminada no
+   vuelve, así que su columna nunca es origen de un arrastre. */
+.conversation-board { height: calc(100vh - 125px); display: flex; flex-direction: column; gap: 10px; }
+.board-columns { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.board-column { min-height: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--canvas); }
+/* Solo se resalta la columna que de verdad acepta esta tarjeta: el resaltado
+   es la respuesta a "¿puedo soltar acá?", y mentir ahí termina en un 409. */
+.board-column.accepts { border-color: var(--purple); background: var(--purple-soft); }
+.board-column > header { position: sticky; top: -12px; margin: -12px -12px 0; padding: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); background: inherit; }
+.board-column > header strong { flex: 1; color: var(--ink); font-size: var(--text-sm); }
+.board-column > header em { padding: 1px 7px; border-radius: 20px; background: var(--surface); font-style: normal; font-size: 12px; }
+.board-empty { margin: 0; padding: 18px 4px; color: var(--subtle); text-align: center; font-size: 13px; }
+.board-card { padding: 10px; display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+.board-card[draggable="true"] { cursor: grab; }
+.board-card.busy { opacity: .55; pointer-events: none; }
+.board-card-open { padding: 0; display: block; width: 100%; text-align: left; border: 0; background: transparent; }
+.board-card-open strong { display: block; color: var(--ink); font-size: 14px; }
+.board-card-open small { display: -webkit-box; overflow: hidden; color: var(--muted); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.board-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.board-tag { padding: 1px 7px; border-radius: 20px; background: var(--purple-soft); color: var(--purple-dark); font-size: 11px; }
+.board-owner { color: var(--subtle); font-size: 11px; }
+.board-unread { margin-left: auto; padding: 1px 7px; border-radius: 20px; background: var(--green-soft); color: var(--green); font-size: 11px; }
+.board-card-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.board-card-actions .text-button { font-size: 12px; }
+
+@media (max-width: 900px) {
+  .conversation-board { height: auto; }
+  .board-columns { grid-template-columns: 1fr; }
+  .board-column { max-height: 60vh; }
+}

@@ -583,6 +583,103 @@ class PortalUser(Base):
     __table_args__ = (UniqueConstraint("client_id", "email", name="uq_portal_users_client_email"),)
 
 
+class PortalInvitation(Base):
+    """Una invitación pendiente a alguien que todavía no tiene ``PortalUser``.
+
+    ``token_hash`` es el único rastro del token en la base: el valor sin
+    hashear vive solo en memoria, en el cuerpo del mail o en la respuesta de
+    creación cuando no hay proveedor configurado (ver services/emails.py e
+    services/invitations.py). ``accepted_at`` no nulo la vuelve inservible para
+    siempre; ``expires_at`` la vence a las 24 h independientemente del uso.
+
+    ``department_id`` usa CASCADE, no SET NULL como ``PortalUser.department_id``:
+    para una invitación *pendiente*, quedarse sin dependencia no es "ve todo el
+    cliente", es una promoción de privilegios que nadie pidió. Ver el
+    docstring de la migración 0028 para el detalle completo.
+    """
+
+    __tablename__ = "portal_invitations"
+    # Espejo de los índices de la migración 0028. Sin esto, la suite —que arma
+    # el esquema con ``Base.metadata.create_all``— corre contra una tabla sin
+    # ninguna de las dos garantías, y un defecto que la base rechazaría en
+    # producción pasa en verde. Las dos son estructurales, no convenciones:
+    # el hash es único, y solo puede existir una invitación PENDIENTE por
+    # cliente y dirección (las aceptadas quedan como rastro y se excluyen).
+    __table_args__ = (
+        Index("uq_portal_invitations_token_hash", "token_hash", unique=True),
+        Index(
+            "uq_portal_invitations_client_email_pending",
+            "client_id",
+            "email",
+            unique=True,
+            postgresql_where=text("accepted_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    email: Mapped[str] = mapped_column(String(320))
+    # server_default además del default de Python, igual que en la migración
+    # 0028: sin él, un INSERT que no pase por el ORM deja la columna en NULL.
+    name: Mapped[str] = mapped_column(String(160), default="", server_default="")
+    token_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    client: Mapped["Client"] = relationship()
+    department: Mapped["Department | None"] = relationship()
+
+
+class ErrorEvent(Base):
+    """Una fila por falla capturada: sitio y errores nativos, sin proveedor externo.
+
+    ``agency_id`` es nulo cuando la fila no se puede atar a un tenant (pre-auth,
+    arranque, un barrido en segundo plano); esa fila queda visible para
+    cualquier persona autenticada en vez de perderse en silencio (Spec:
+    Agency Scoping). ``message`` y ``traceback`` ya llegan redactados y
+    truncados desde ``services/error_log.py`` — este modelo no aplica ningún
+    filtro, solo persiste lo que ya fue saneado.
+    """
+
+    __tablename__ = "error_events"
+    # Espejo exacto de los índices de la migración 0029, nombre por nombre.
+    # Ninguna columna usa index=True: eso generaría un tercer índice que la
+    # migración no crea, y la suite (que arma el esquema con create_all)
+    # dejaría pasar en verde una divergencia que la base real sí tiene — el
+    # mismo defecto W1 encontrado al verificar agent-invitation-email.
+    __table_args__ = (
+        Index("ix_error_events_occurred_at", "occurred_at"),
+        Index("ix_error_events_agency_id_occurred_at", "agency_id", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    # Sin server_default, igual que portal_invitations.created_at (0028): el
+    # default de Python es la única fuente del valor, así los dos lados nunca
+    # pueden divergir.
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    agency_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agencies.id", ondelete="CASCADE"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(60))
+    capture_kind: Mapped[str] = mapped_column(String(20))
+    exception_type: Mapped[str] = mapped_column(String(120))
+    message: Mapped[str] = mapped_column(Text)
+    traceback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_method: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    request_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
 class PushDevice(Base):
     """Un teléfono que pidió que le avisen cuando una conversación necesita una
     persona.

@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -491,6 +492,28 @@ class PortalLoginRequest(BaseModel):
     password: str
 
 
+class PortalInvitationAccept(BaseModel):
+    token: str = Field(min_length=1)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def _fits_bcrypt(cls, value: str) -> str:
+        """bcrypt rechaza cualquier entrada de más de 72 bytes con ValueError.
+
+        Sin este chequeo, ``hash_password`` —que corre como primera línea del
+        handler, antes de mirar el token— convierte una contraseña larga en un
+        500 en un endpoint público y sin autenticar. Se valida en bytes y no en
+        caracteres porque una tilde ocupa dos.
+
+        No filtra nada: el rechazo depende solo del largo de la contraseña, que
+        quien la escribió ya conoce, nunca de si el token existe.
+        """
+        if len(value.encode()) > 72:
+            raise ValueError("The password must be at most 72 bytes long")
+        return value
+
+
 class PortalPublicOut(BaseModel):
     client_name: str
     portal_title: str
@@ -509,6 +532,26 @@ class PortalSessionOut(BaseModel):
     # The person behind the session; absent on sessions that predate portal users.
     user_id: uuid.UUID | None = None
     user_name: str | None = None
+
+
+class InvitationOut(BaseModel):
+    """Lo que ve la persona admin sobre una invitación pendiente (o vencida).
+
+    ``accept_url`` solo viaja acá cuando no hay proveedor de mail configurado
+    (``delivery == "manual"``): con e-mail activo queda explícitamente en
+    ``None`` — no una clave ausente — para que el frontend tenga una sola
+    rama. ``"failed"`` solo aparece en una lectura posterior de
+    ``GET /clients/{id}/departments``, nunca en la respuesta de creación: el
+    envío en segundo plano corre después de que esa respuesta ya salió.
+    """
+
+    id: uuid.UUID
+    email: str
+    expires_at: datetime
+    delivery: Literal["sent", "manual", "failed"]
+    accept_url: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardOut(BaseModel):
@@ -652,3 +695,21 @@ class WhatsAppInboundResult(BaseModel):
 class WhatsAppOutboundConfirm(BaseModel):
     message_id: uuid.UUID
     external_message_id: str = Field(min_length=1, max_length=255)
+
+
+class ErrorEventOut(ORMModel):
+    """Espejo de lectura de ``ErrorEvent``. ``agency_id`` nunca se serializa:
+    ``is_global`` (calculado en el router) alcanza para que la página marque
+    una fila sin agencia sin exponer jamás un uuid de tenant ajeno."""
+
+    id: uuid.UUID
+    occurred_at: datetime
+    source: str
+    capture_kind: str
+    exception_type: str
+    message: str
+    traceback: str | None
+    request_method: str | None
+    request_path: str | None
+    subject_ref: str | None
+    is_global: bool = False

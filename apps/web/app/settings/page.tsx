@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Eye, EyeOff, ImagePlus, LoaderCircle, Save, ShieldCheck, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { Activity, CheckCircle2, Eye, EyeOff, ImagePlus, LoaderCircle, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { PageHead } from "@/components/ui";
 import { FormSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
@@ -67,6 +68,8 @@ export default function SettingsPage() {
         <ProviderKeyCard key={preset.id} preset={preset} state={providers.find((x) => x.provider === preset.id)} busy={busy} onSave={saveKey} onRemove={removeKey} t={t} />
       ))}
     </section>
+
+    <section className="section-block"><div className="section-heading"><div><h2>{t("settings.index.healthHeading")}</h2><p>{t("settings.index.healthCopy")}</p></div><Link href="/settings/health" className="button secondary"><Activity size={16} /> {t("settings.index.healthCta")}</Link></div></section>
   </div>;
 }
 

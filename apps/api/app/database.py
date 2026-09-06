@@ -26,6 +26,12 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_recycle=240,
     connect_args=KEEPALIVE_CONNECT_ARGS,
+    # Sin esto, SQLAlchemy le pega "[SQL: ...] [parameters: {...}]" al texto de
+    # CUALQUIER StatementError — IntegrityError, DataError, OperationalError —,
+    # y esos parámetros son la fila que se estaba escribiendo: mails, teléfonos,
+    # password_hash, token_hash, ciphertext. Cualquier capa que guarde o loguee
+    # el texto de la excepción guarda también esos datos.
+    hide_parameters=True,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
