@@ -79,3 +79,25 @@ All five containers also run with `no-new-privileges`, and none runs as root:
 `api`, `web` and `whatsapp` carry their own user, the gateway runs as `gateway`
 listening on 8080, and PostgreSQL drops to its own user at startup. The one
 exception is the gateway under custom domains, explained in `self-hosting.md`.
+
+## Agency registration
+
+Registration closes itself by default: once one agency exists,
+`POST /api/auth/register` answers 403 to everyone. The first person to arrive
+sets the instance up and nobody else can create an account from outside.
+
+| Variable | What it does | Default |
+| --- | --- | --- |
+| `ALLOW_MULTI_AGENCY` | Leaves registration open permanently, to host several agencies on one deployment | `false` |
+
+Two things open when you turn it on, and the second one is easy to miss:
+
+- **Anyone with the URL can create an agency.** There is no invitation and no
+  signup code. If the instance faces the internet, put your own gate in front.
+- **Registration starts telling addresses apart.** With registration closed, an
+  address that already has an account and one that does not get the same answer;
+  with it open, an already-registered address returns 409, which can be used to
+  find out who has an account here. The route's rate limit — 10 attempts per
+  minute per IP — is what puts a price on probing.
+
+Neither applies at the default value.

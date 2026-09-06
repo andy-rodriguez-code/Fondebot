@@ -80,3 +80,26 @@ como root: `api`, `web` y `whatsapp` traen su propio usuario, el gateway corre
 como `gateway` escuchando en 8080, y PostgreSQL baja al suyo en el arranque. La
 única excepción es el gateway con dominios propios, y está explicada en
 `self-hosting.md`.
+
+## Registro de agencias
+
+Por defecto el registro se cierra solo: en cuanto existe una agencia,
+`POST /api/auth/register` responde 403 para cualquiera. La primera persona que
+llega configura la instancia y nadie más puede crear una cuenta desde afuera.
+
+| Variable | Qué hace | Por defecto |
+| --- | --- | --- |
+| `ALLOW_MULTI_AGENCY` | Deja el registro abierto para siempre, para alojar varias agencias en un mismo deployment | `false` |
+
+Antes de encenderlo conviene saber qué abre, porque son dos cosas y la segunda
+suele pasar desapercibida:
+
+- **Cualquiera con la URL puede crear una agencia.** No hay invitación ni código
+  de alta. Si la instancia mira a internet, poné tu propia puerta adelante.
+- **El registro pasa a distinguir direcciones.** Con el registro cerrado, una
+  dirección que ya tiene cuenta y una que no reciben la misma respuesta; con el
+  registro abierto, una dirección ya registrada devuelve 409 y eso se puede usar
+  para averiguar quién tiene cuenta acá. El límite de tasa de la ruta —10
+  intentos por minuto y por IP— es lo que le pone precio a probar.
+
+Con el valor por defecto ninguna de las dos aplica.

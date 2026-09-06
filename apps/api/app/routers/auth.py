@@ -59,6 +59,14 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
         )
     email = payload.email.lower()
     if db.scalar(select(User).where(User.email == email)):
+        # Esta respuesta dice que la dirección ya tiene cuenta, y el orden en
+        # que está escrita es lo que hace que casi nunca se pueda usar para
+        # averiguarlo: con la postura por defecto el registro ya se cerró más
+        # arriba, así que una dirección conocida y una desconocida reciben el
+        # mismo 403. Solo se alcanza con `allow_multi_agency`, donde el registro
+        # queda abierto. Taparlo ahí pide verificar la dirección por correo
+        # antes de crear nada; mientras tanto, el límite de tasa de la ruta es
+        # lo que le pone precio a probar. Ver tests/test_registration_disclosure.py.
         raise HTTPException(status_code=409, detail="A user with that email already exists")
     agency_name = payload.agency_name.strip()
     agency = Agency(name=agency_name, slug=unique_slug(db, Agency, "slug", agency_name))
