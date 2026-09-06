@@ -1450,3 +1450,14 @@ p .msg-time, .bubble .msg-time { float: none; position: absolute; right: 11px; b
   .board-columns { grid-template-columns: 1fr; }
   .board-column { max-height: 60vh; }
 }
+
+/* Diálogo de confirmación. Reemplaza al confirm() del navegador, que se dibuja
+   pegado arriba de la ventana, sin relación con la página ni con el idioma de
+   la interfaz. */
+.confirm-modal { width: min(430px, 100%); }
+.confirm-modal .modal-head { border-bottom: 0; padding-bottom: 12px; }
+.confirm-body { padding: 0 26px 0; }
+.confirm-consequence { margin: 0 0 4px; padding: 11px 13px; display: flex; align-items: flex-start; gap: 9px;
+  border: 1px solid #f0c9cd; border-radius: 11px; background: #fdf3f4; color: #a3303c; font-size: 12.5px; font-weight: 600; }
+.confirm-consequence svg { flex: none; margin-top: 1px; }
+.confirm-body .modal-actions { margin-top: 17px; }

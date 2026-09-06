@@ -10,6 +10,9 @@ const en = {
     save: "Save",
     saveChanges: "Save changes",
     cancel: "Cancel",
+    // Shown only when the action truly cannot be undone. Writing it on a
+    // reversible one teaches people to click through it.
+    irreversible: "This cannot be undone.",
     create: "Create",
     delete: "Delete",
     edit: "Edit",
@@ -131,6 +134,7 @@ const es: typeof en = {
     save: "Guardar",
     saveChanges: "Guardar cambios",
     cancel: "Cancelar",
+    irreversible: "Esta acción no se puede deshacer.",
     create: "Crear",
     delete: "Eliminar",
     edit: "Editar",

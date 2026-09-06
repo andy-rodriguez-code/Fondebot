@@ -9,12 +9,14 @@ import { FormSkeleton, ListRowsSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { useConfirm } from "@/components/confirm-dialog";
 import type { AgentSummary, Client, ClientDomain, Conversation, Department, InvitationOut, PortalUser } from "@/types";
 
 type Tab = "details" | "agents" | "channels" | "departments" | "inbox" | "portal";
 
 export default function ClientDetailPage() {
   const t = useT();
+  const confirm = useConfirm();
   const toast = useToast();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -53,7 +55,14 @@ export default function ClientDetailPage() {
   }
 
   async function remove() {
-    if (!client || !confirm(t("clients.detail.confirmDelete", { name: client.name }))) return;
+    if (!client) return;
+    const ok = await confirm({
+      title: t("clients.detail.confirmDelete", { name: client.name }),
+      consequence: t("common.irreversible"),
+      confirmLabel: t("common.delete"),
+      tone: "danger",
+    });
+    if (!ok) return;
     await api(`/clients/${id}`, { method: "DELETE" }); router.push("/clients");
   }
 
@@ -80,6 +89,7 @@ export default function ClientDetailPage() {
 
 function Departments({ clientId, agents }: { clientId: string; agents: AgentSummary[] }) {
   const t = useT();
+  const confirm = useConfirm();
   const toast = useToast();
   const [rows, setRows] = useState<Department[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -128,7 +138,14 @@ function Departments({ clientId, agents }: { clientId: string; agents: AgentSumm
   }
 
   async function remove(row: Department) {
-    if (!confirm(t("clients.detail.departmentConfirmDelete", { name: row.name }))) return;
+    const ok = await confirm({
+      title: t("clients.detail.departmentConfirmDeleteTitle", { name: row.name }),
+      body: t("clients.detail.departmentConfirmDelete", { name: row.name }),
+      consequence: t("common.irreversible"),
+      confirmLabel: t("common.delete"),
+      tone: "danger",
+    });
+    if (!ok) return;
     try { await api(`/clients/${clientId}/departments/${row.id}`, { method: "DELETE" }); toast.success(t("clients.detail.departmentRemoved")); await load(); }
     catch (err) { toast.error(messageFrom(err)); }
   }

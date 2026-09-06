@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Pencil, Plus, Server, Trash2, Wrench, Zap } from "lucide-react";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { useConfirm } from "@/components/confirm-dialog";
 import { useToast } from "@/components/toast";
 import type { AgentTool } from "@/types";
 import { HttpToolModal } from "./http-tool-modal";
@@ -15,6 +16,7 @@ export function AgentToolsTab({ agentId, tools, onToolsChange }: {
   onToolsChange: (tools: AgentTool[]) => void;
 }) {
   const t = useT();
+  const confirm = useConfirm();
   const toast = useToast();
   // null = closed, "new" = create, otherwise the tool being edited.
   const [httpModal, setHttpModal] = useState<AgentTool | "new" | null>(null);
@@ -36,7 +38,13 @@ export function AgentToolsTab({ agentId, tools, onToolsChange }: {
   }
 
   async function remove(tool: AgentTool) {
-    if (!confirm(t("tools.confirmDelete", { name: tool.name }))) return;
+    const ok = await confirm({
+      title: t("tools.confirmDelete", { name: tool.name }),
+      consequence: t("common.irreversible"),
+      confirmLabel: t("common.delete"),
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await api(`/agents/${agentId}/tools/${tool.id}`, { method: "DELETE" });
       onToolsChange(tools.filter((item) => item.id !== tool.id));

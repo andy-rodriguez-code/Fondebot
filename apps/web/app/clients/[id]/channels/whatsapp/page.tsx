@@ -7,6 +7,7 @@ import { ArrowLeft, Bot, CheckCircle2, CircleAlert, LoaderCircle, MessageCircle,
 import { Alert } from "@/components/ui";
 import { api, ApiError, messageFrom } from "@/lib/api";
 import { useT, type I18nKey } from "@/lib/i18n";
+import { useConfirm } from "@/components/confirm-dialog";
 import type { Client, WhatsAppChannel } from "@/types";
 
 const stateKeys: Record<WhatsAppChannel["status"], { label: I18nKey; copy: I18nKey }> = {
@@ -20,6 +21,7 @@ const stateKeys: Record<WhatsAppChannel["status"], { label: I18nKey; copy: I18nK
 
 export default function WhatsAppChannelPage() {
   const t = useT();
+  const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const [client, setClient] = useState<Client | null>(null);
   const [channel, setChannel] = useState<WhatsAppChannel | null>(null);
@@ -66,7 +68,12 @@ export default function WhatsAppChannelPage() {
   }
 
   async function disconnect() {
-    if (!confirm(t("clients.whatsapp.confirmDisconnect"))) return;
+    const ok = await confirm({
+      title: t("clients.whatsapp.confirmDisconnect"),
+      confirmLabel: t("clients.whatsapp.disconnectAccount"),
+      tone: "danger",
+    });
+    if (!ok) return;
     setBusy(true); setError("");
     try { setChannel(await api<WhatsAppChannel>(`/whatsapp/channels/${id}/disconnect`, { method: "POST" })); }
     catch (err) { setError(messageFrom(err)); } finally { setBusy(false); }
