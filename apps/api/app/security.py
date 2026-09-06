@@ -1,5 +1,7 @@
 import base64
 import hashlib
+import hmac
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -74,3 +76,38 @@ def mask_secret(value: str) -> str:
     if len(value) <= 8:
         return "••••••••"
     return f"{value[:3]}••••••••{value[-4:]}"
+
+
+def generate_invitation_token() -> str:
+    """Un token de invitación de un solo uso, 256 bits de entropía.
+
+    A diferencia de una contraseña humana, esto no es un secreto de baja
+    entropía: no hace falta (ni conviene) el costo de bcrypt para protegerlo,
+    ver D1 en el diseño de agent-invitation-email. ``token_urlsafe(32)``
+    devuelve 43 caracteres base64 URL-safe.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def hash_invitation_token(raw_token: str) -> str:
+    """Digest determinístico para buscar por índice único (D1/D2).
+
+    Un hash determinístico permite ``SELECT ... WHERE token_hash = :digest``
+    en un índice único en vez de recorrer cada fila pendiente con un hash con
+    sal. No hace falta resistencia contra diccionario: el valor de entrada es
+    un token de 256 bits generado por el propio servidor, no algo que alguien
+    eligió.
+    """
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def verify_invitation_token(raw_token: str, token_hash: str) -> bool:
+    """Comparación en tiempo constante después de la búsqueda por índice.
+
+    Esto es defensa en profundidad y consistencia con el resto del código
+    (``whatsapp.py``, ``whatsapp_cloud_webhook.py``), no lo que hace segura la
+    verificación: eso ya lo garantiza el hash (D2). El atacante controla el
+    valor sin hashear, no el digest, así que no hay un byte a byte que recorrer
+    contra el hash guardado.
+    """
+    return hmac.compare_digest(hash_invitation_token(raw_token), token_hash)

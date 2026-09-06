@@ -583,6 +583,45 @@ class PortalUser(Base):
     __table_args__ = (UniqueConstraint("client_id", "email", name="uq_portal_users_client_email"),)
 
 
+class PortalInvitation(Base):
+    """Una invitación pendiente a alguien que todavía no tiene ``PortalUser``.
+
+    ``token_hash`` es el único rastro del token en la base: el valor sin
+    hashear vive solo en memoria, en el cuerpo del mail o en la respuesta de
+    creación cuando no hay proveedor configurado (ver services/emails.py e
+    services/invitations.py). ``accepted_at`` no nulo la vuelve inservible para
+    siempre; ``expires_at`` la vence a las 24 h independientemente del uso.
+
+    ``department_id`` usa CASCADE, no SET NULL como ``PortalUser.department_id``:
+    para una invitación *pendiente*, quedarse sin dependencia no es "ve todo el
+    cliente", es una promoción de privilegios que nadie pidió. Ver el
+    docstring de la migración 0028 para el detalle completo.
+    """
+
+    __tablename__ = "portal_invitations"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    email: Mapped[str] = mapped_column(String(320))
+    name: Mapped[str] = mapped_column(String(160), default="")
+    token_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    client: Mapped["Client"] = relationship()
+    department: Mapped["Department | None"] = relationship()
+
+
 class PushDevice(Base):
     """Un teléfono que pidió que le avisen cuando una conversación necesita una
     persona.

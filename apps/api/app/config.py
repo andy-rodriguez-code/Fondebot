@@ -93,6 +93,24 @@ class Settings(BaseSettings):
     push_webhook_url: str = ""
     push_webhook_secret: str = ""
 
+    # Envío de invitaciones al portal por mail. "none" (el default) no manda
+    # nada: la invitación se crea igual y el link queda en la respuesta de la
+    # API para que la persona admin lo reenvíe a mano. "smtp" manda el mail de
+    # verdad contra un servidor SMTP operado por quien despliega. Ver
+    # app/services/emails.py — smtp_password legítimamente queda vacío en toda
+    # instalación que no usa mail, así que a propósito NO entra en
+    # INSECURE_VALUES: ese guard es para valores de relleno publicados, no para
+    # un campo opcional que la mayoría de instalaciones deja sin usar.
+    email_provider: str = "none"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    # Minutos de vigencia de un token de invitación (24 h por defecto).
+    invitation_token_minutes: int = 1440
+
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", APP_DIR / ".env"),
         env_file_encoding="utf-8",
