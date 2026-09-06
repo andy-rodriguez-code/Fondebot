@@ -1,4 +1,4 @@
-FROM python:3.12.11-slim-bookworm
+FROM python:3.12.11-slim-bookworm AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -24,7 +24,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY alembic.ini ./alembic.ini
 COPY migrations ./migrations
 COPY app ./app
-COPY tests ./tests
 
 RUN mkdir -p /app/backend/storage \
     && chown -R openlivery:openlivery /app
@@ -34,3 +33,22 @@ USER openlivery
 EXPOSE 8000
 
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+
+
+# Etapa de desarrollo: agrega pytest y la suite. La construye compose
+# (`target: dev`), para que `make test` pueda correr los tests dentro del
+# contenedor levantado.
+FROM base AS dev
+
+USER root
+COPY requirements-dev.txt ./requirements-dev.txt
+RUN pip install --no-cache-dir -r requirements-dev.txt
+COPY tests ./tests
+RUN chown -R openlivery:openlivery /app
+USER openlivery
+
+
+# La imagen que se publica es exactamente `base`. Esta etapa existe solo para
+# ser la ultima y, por lo tanto, la que se construye por defecto: la de
+# desarrollo hay que pedirla a proposito, asi nadie publica pytest sin querer.
+FROM base AS runtime

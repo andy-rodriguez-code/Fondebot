@@ -13,4 +13,3 @@ httpx==0.28.1
 mcp==1.28.1
 dnspython==2.7.0
 email-validator==2.2.0
-pytest==8.4.1

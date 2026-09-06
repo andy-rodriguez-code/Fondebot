@@ -22,7 +22,7 @@ Copy `.env.example` to `.env` and point `DATABASE_URL` at your PostgreSQL. Insta
 
 ```bash
 cd apps/api
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 alembic upgrade head            # migrations must run before starting
 uvicorn app.main:app --reload --port 8000
 ```
@@ -77,7 +77,7 @@ All code, identifiers, comments, commit messages and docs are written in **Engli
 
 | Service | Command | What it does |
 | --- | --- | --- |
-| Backend | `pip install -r requirements.txt` | Install Python dependencies |
+| Backend | `pip install -r requirements-dev.txt` | Install Python dependencies, pytest included |
 | Backend | `alembic upgrade head` | Apply pending migrations |
 | Backend | `uvicorn app.main:app --reload --port 8000` | Run the API with hot reload |
 | Backend | `pytest -q` | Run the test suite |

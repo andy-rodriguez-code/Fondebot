@@ -75,6 +75,8 @@ npm run build                                # tsc typecheck
 
 ### Backend tests
 
+`requirements.txt` holds only what the app needs to run — it is what the published image installs. `pytest` lives in `requirements-dev.txt`, so install that one to run the suite locally (`pip install -r requirements-dev.txt`). The Docker stack builds the `dev` target, which is why `make test` can run pytest inside the running container.
+
 Tests need a separate `openlivery_test` database (default URL in `apps/api/tests/conftest.py`, override with `TEST_DATABASE_URL`). Tables are created/dropped per test — never point it at the dev DB.
 
 ```bash
