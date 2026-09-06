@@ -232,11 +232,11 @@ jobs:
 
       - name: Show logs when something failed
         if: failure()
-        run: docker compose --env-file .env.docker logs --tail 120
+        run: '[ -f .env.docker ] && docker compose --env-file .env.docker logs --tail 120 || echo "el stack nunca arranco"'
 
       - name: Tear down
         if: always()
-        run: docker compose --env-file .env.docker down -v
+        run: '[ -f .env.docker ] && docker compose --env-file .env.docker down -v || true'
 
   publish:
     name: publish ${{ matrix.service }} image
