@@ -16,7 +16,7 @@ export class ApiError extends Error {
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const isForm = options.body instanceof FormData;
-  const response = await fetch(`${API_URL}/api${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...options,
     credentials: "include",
     headers: {
@@ -52,9 +52,11 @@ export function messageFrom(error: unknown): string {
   return error instanceof Error ? error.message : translate("errors.unexpected");
 }
 
-// URL absoluta para recursos de la API referenciados fuera de fetch() (por
-// ejemplo, el src de un <img>/<audio> de un adjunto); las cookies viajan porque
-// los adjuntos son del mismo origen.
+// URL absoluta para recursos de la API referenciados fuera de fetch(): el src
+// de un <img>/<audio> de un adjunto, y el stream de EventSource del portal. Las
+// cookies viajan porque son del mismo origen. Que `api()` la use también es a
+// propósito: una segunda copia de esta línea es una copia que se va a quedar
+// vieja.
 export function apiUrl(path: string): string {
   return `${API_URL}/api${path}`;
 }

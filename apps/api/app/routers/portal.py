@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Cookie, Depends, Header, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, case, func, or_, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -49,6 +50,7 @@ from ..services.conversation_state import ConversationClosed, assign, note_reply
 from ..services.notifications import notify_assigned
 from ..services.attachments import attachment_response, conversation_attachment, logo_response
 from ..services.operator_media import store_operator_media_reply
+from ..services.realtime import publish as publish_change, stream as realtime_stream
 from ..services.whatsapp import send_channel_message
 
 
@@ -180,6 +182,19 @@ def _detail(db: Session, client: Client, conversation_id: uuid.UUID, user: Porta
         # department is itself something this person should not learn.
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+def _publish_change(conversation: Conversation) -> None:
+    """Avisa por SSE que esta conversación cambió.
+
+    Va con la conversación ya recargada, después del commit, así quien vuelve a
+    pedir encuentra el estado nuevo y no el de antes.
+    """
+    publish_change(
+        client_id=conversation.client_id,
+        department_id=conversation.department_id,
+        conversation_id=conversation.id,
+    )
 
 
 @router.get("/{slug}", response_model=PortalPublicOut)
@@ -893,7 +908,9 @@ async def portal_reply_template(
     note_reply(conversation)
     conversation.updated_at = now_utc()
     db.commit()
-    return _present(_detail(db, client, conversation_id, user))
+    changed = _detail(db, client, conversation_id, user)
+    _publish_change(changed)
+    return _present(changed)
 
 
 @router.get("/{slug}/conversations/summary", response_model=PortalInboxSummary)
@@ -963,7 +980,9 @@ def portal_mode(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if changed:
         db.commit()
-    return _present(_detail(db, client, conversation_id, user))
+    changed = _detail(db, client, conversation_id, user)
+    _publish_change(changed)
+    return _present(changed)
 
 
 @router.post("/{slug}/conversations/{conversation_id}/assignment", response_model=ConversationDetail)
@@ -999,7 +1018,9 @@ async def portal_assign(
         db.commit()
         if assignee and (not user or assignee.id != user.id):
             await notify_assigned(db, conversation, assignee, sender_name)
-    return _present(_detail(db, client, conversation_id, user))
+    changed = _detail(db, client, conversation_id, user)
+    _publish_change(changed)
+    return _present(changed)
 
 
 @router.patch("/{slug}/conversations/{conversation_id}/status", response_model=ConversationDetail)
@@ -1019,7 +1040,9 @@ def portal_status(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if changed:
         db.commit()
-    return _present(_detail(db, client, conversation_id, user))
+    changed = _detail(db, client, conversation_id, user)
+    _publish_change(changed)
+    return _present(changed)
 
 
 @router.get("/{slug}/conversations/{conversation_id}/attachments/{attachment_id}")
@@ -1053,7 +1076,9 @@ async def portal_reply_media(
     await store_operator_media_reply(
         db, conversation, file=file, caption=caption, sender_name=sender_name, portal_user_id=user.id if user else None
     )
-    return _present(_detail(db, client, conversation_id, user))
+    changed = _detail(db, client, conversation_id, user)
+    _publish_change(changed)
+    return _present(changed)
 
 
 @router.post("/{slug}/conversations/{conversation_id}/reply", response_model=ConversationDetail)
@@ -1085,4 +1110,39 @@ async def portal_reply(
     note_reply(conversation)
     conversation.updated_at = now_utc()
     db.commit()
-    return _present(_detail(db, client, conversation_id, user))
+    changed = _detail(db, client, conversation_id, user)
+    _publish_change(changed)
+    return _present(changed)
+
+
+@router.get("/{slug}/events")
+def portal_events(
+    slug: str,
+    client: Client = Depends(_portal_client),
+    user: PortalUser | None = Depends(_portal_user),
+):
+    """Avisa en vivo que una conversación cambió, por Server-Sent Events.
+
+    Manda una señal y no contenido: quien escucha vuelve a pedir por los
+    endpoints de siempre, que ya aplican ``_visible``. Empujar la conversación
+    por acá pondría una segunda copia de la frontera de dependencias en el
+    camino de los eventos, y una frontera duplicada es una frontera que se va a
+    desincronizar.
+
+    Se autentica con la misma cookie que todo el portal: ``EventSource`` no
+    puede mandar cabeceras, así que la forma con Bearer —la que usa
+    ``apps/mobile``— no entra por acá. El refresco por intervalo sigue estando
+    para quien no pueda abrir el stream.
+    """
+    return StreamingResponse(
+        realtime_stream(client.id, user.department_id if user else None),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Para nginx, que buferea por defecto y convertiría esto en un lote
+            # con retraso en vez de un aviso. Caddy no lo necesita, pero la
+            # guía de auto-hospedaje manda poner otro proxy adelante y no
+            # sabemos cuál.
+            "X-Accel-Buffering": "no",
+        },
+    )
