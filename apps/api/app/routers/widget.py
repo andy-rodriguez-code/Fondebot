@@ -79,7 +79,7 @@ def _conversation(db: Session, agent: Agent, session_id: str) -> Conversation:
     return conversation
 
 
-@router.get("/{public_id}", response_model=WidgetConfigOut)
+@router.get("/{public_id}", response_model=WidgetConfigOut, dependencies=[Depends(public_asset_rate_limit)])
 def widget_config(public_id: str, db: Session = Depends(get_db)):
     agent = _agent(db, public_id)
     agency = db.get(Agency, agent.agency_id)

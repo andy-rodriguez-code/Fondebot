@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app import config
+from app.main import app
 from app.ratelimit import RateLimiter, client_ip, invitation_rate_limit, login_rate_limit
 
 
@@ -89,3 +90,23 @@ def test_invitation_accept_is_rate_limited(client, monkeypatch):
     finally:
         invitation_rate_limit._hits.clear()
         config.get_settings.cache_clear()
+
+
+def test_every_public_widget_route_is_rate_limited():
+    """Ninguna ruta del widget puede quedar sin límite.
+
+    Se afirma sobre la app entera y no sobre una ruta concreta a propósito. El
+    hallazgo que originó esto fue que ``GET /api/widget/{public_id}`` era la
+    única sin límite entre seis hermanas: nadie lo sacó, simplemente nunca se
+    lo pusieron. Un test por ruta no habría dicho nada de la séptima.
+
+    Todo lo que cuelga de ``/api/widget/`` es público y sin autenticar: es la
+    superficie que cualquiera alcanza desde el sitio de la clientela.
+    """
+    unlimited = [
+        route.path
+        for route in app.routes
+        if getattr(route, "path", "").startswith("/api/widget/")
+        and not any(isinstance(dep.dependency, RateLimiter) for dep in getattr(route, "dependencies", []))
+    ]
+    assert unlimited == []
