@@ -1,0 +1,30 @@
+# Sin esto, Git en Windows hace checkout con CRLF y algunos archivos dejan de
+# funcionar dentro de un contenedor Linux. El caso concreto que lo destapó: el
+# script de init de postgres quedaba con `#!/bin/sh\r`, el kernel buscaba un
+# intérprete llamado "/bin/sh\r", y la base de datos de tests nunca se creaba.
+# El mensaje que deja es "required file not found", que no menciona la causa.
+#
+# CI no puede encontrar esto: en Linux el checkout ya viene con LF. Solo aparece
+# en la máquina de quien desarrolla en Windows.
+
+# Normaliza a LF dentro del repositorio; el checkout sigue la convención del
+# sistema salvo donde se diga lo contrario abajo.
+* text=auto
+
+# Todo lo que un contenedor Linux lee o ejecuta se queda en LF siempre.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+.githooks/* text eol=lf
+docker/Caddyfile* text eol=lf
+docker/**/Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binarios: que Git no los toque.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
