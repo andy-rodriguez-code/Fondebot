@@ -516,6 +516,7 @@ class DashboardOut(BaseModel):
     active_clients: int
     agents: int
     active_agents: int
+    departments: int
     conversations: int
     channels: int
     connected_channels: int
@@ -539,8 +540,24 @@ class ModelUsage(BaseModel):
     output_tokens: int
 
 
+class DepartmentLoad(BaseModel):
+    name: str
+    conversations: int
+
+
 class DashboardMetrics(BaseModel):
     messages: int
+    # Recibido es lo que escribió el contacto; enviado es todo lo que salió
+    # hacia él, sea de la IA o de una persona. Ninguno cuenta las filas de
+    # actividad del hilo, que no son mensajes de nadie.
+    messages_received: int
+    messages_sent: int
+    by_department: list[DepartmentLoad]
+    # Mediana en segundos desde que se abre la conversación hasta la primera
+    # respuesta. None cuando ninguna respondió todavía en la ventana: no es
+    # cero, es que no hay dato, y mostrar cero sería mentir hacia el lado
+    # bueno.
+    median_first_reply_seconds: int | None
     human_conversations: int
     by_channel: dict[str, int]
     daily_conversations: list[DailyPoint]

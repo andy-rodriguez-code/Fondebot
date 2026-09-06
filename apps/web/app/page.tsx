@@ -2,18 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Bot, Building2, Cpu, MessagesSquare, MessageSquareText, Radio, UserRound } from "lucide-react";
+import { ArrowRight, Bot, Building2, Clock, Cpu, MessagesSquare, MessageSquareText, Radio, Send, UserRound } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatDuration } from "@/lib/datetime";
 import { useT } from "@/lib/i18n";
 import { PageHead, StatusBadge } from "@/components/ui";
 import { ListRowsSkeleton, PanelSkeleton, Skeleton } from "@/components/skeleton";
 import type { Agent, AgentSummary, Conversation } from "@/types";
 
-type Dashboard = { clients: number; active_clients: number; agents: number; active_agents: number; conversations: number; channels: number; connected_channels: number; recent_agents: AgentSummary[] };
+type Dashboard = { clients: number; active_clients: number; agents: number; active_agents: number; departments: number; conversations: number; channels: number; connected_channels: number; recent_agents: AgentSummary[] };
 type DailyPoint = { date: string; count: number };
 type TopAgent = { id: string; name: string; conversations: number };
 type ModelUsage = { model: string; input_tokens: number; output_tokens: number };
-type Metrics = { messages: number; human_conversations: number; by_channel: Record<string, number>; daily_conversations: DailyPoint[]; top_agents: TopAgent[]; tokens_in: number; tokens_out: number; usage_by_model: ModelUsage[] };
+type DepartmentLoad = { name: string; conversations: number };
+type Metrics = { messages: number; messages_received: number; messages_sent: number; by_department: DepartmentLoad[]; median_first_reply_seconds: number | null; human_conversations: number; by_channel: Record<string, number>; daily_conversations: DailyPoint[]; top_agents: TopAgent[]; tokens_in: number; tokens_out: number; usage_by_model: ModelUsage[] };
 
 export default function HomePage() {
   const t = useT();
@@ -41,14 +43,14 @@ export default function HomePage() {
       </section>
       <section className="metrics-grid">
         <article className="metric-card"><span className="metric-icon blue"><Building2 size={20} /></span><div><small>{t("home.metrics.clients")}</small><strong>{loadedCore ? data?.clients ?? "—" : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.metrics.clientsActive", { count: data?.active_clients ?? 0 })}</p></div></article>
-        <article className="metric-card"><span className="metric-icon violet"><Bot size={20} /></span><div><small>{t("home.metrics.agents")}</small><strong>{loadedCore ? agents.length || data?.agents || "—" : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.metrics.agentsActive", { count: agents.filter((item) => item.is_active).length })}</p></div></article>
+        <article className="metric-card"><span className="metric-icon blue"><Building2 size={20} /></span><div><small>{t("home.metrics.departments")}</small><strong>{loadedCore ? data?.departments ?? "—" : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.metrics.departmentsCaption")}</p></div></article><article className="metric-card"><span className="metric-icon violet"><Bot size={20} /></span><div><small>{t("home.metrics.agents")}</small><strong>{loadedCore ? agents.length || data?.agents || "—" : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.metrics.agentsActive", { count: agents.filter((item) => item.is_active).length })}</p></div></article>
         <article className="metric-card"><span className="metric-icon green"><MessageSquareText size={20} /></span><div><small>{t("home.metrics.conversations")}</small><strong>{loadedCore ? conversations.length : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.metrics.conversationsCaption")}</p></div></article>
         <article className="metric-card"><span className="metric-icon amber"><Radio size={20} /></span><div><small>{t("home.metrics.channels")}</small><strong>{loadedCore ? data?.channels ?? "—" : <Skeleton className="sk-line" style={{ width: 52, height: 28 }} />}</strong><p>{t("home.metrics.channelsConnected", { count: data?.connected_channels ?? 0 })}</p></div></article>
       </section>
       <section className="dashboard-row">
         <div className="panel trend-panel">
           <div className="panel-head"><div><h3>{t("home.activity.title")}</h3><p>{t("home.activity.subtitle", { count: range })}</p></div>
-            <div className="trend-stats"><span><MessagesSquare size={14} /> {metrics?.messages ?? 0} · {t("home.activity.messages")}</span><span><UserRound size={14} /> {metrics?.human_conversations ?? 0} · {t("home.activity.humanHandled")}</span></div>
+            <div className="trend-stats"><span><MessagesSquare size={14} /> {metrics?.messages_received ?? 0} · {t("home.activity.received")}</span><span><Send size={14} /> {metrics?.messages_sent ?? 0} · {t("home.activity.sent")}</span><span><UserRound size={14} /> {metrics?.human_conversations ?? 0} · {t("home.activity.humanHandled")}</span><span><Clock size={14} /> {metrics?.median_first_reply_seconds != null ? formatDuration(metrics.median_first_reply_seconds) : t("home.activity.firstReplyNone")} · {t("home.activity.firstReply")}</span></div>
           </div>
           {!loadedMetrics ? <PanelSkeleton rows={3} slim /> : trend.some((p) => p.count > 0) ? <>
             <div className="trend-chart">{trend.map((p) => <div key={p.date} className="trend-col" title={`${p.date}: ${p.count}`}><div className="trend-bar" style={{ height: `${Math.round((p.count / maxDaily) * 100)}%` }} /></div>)}</div>
