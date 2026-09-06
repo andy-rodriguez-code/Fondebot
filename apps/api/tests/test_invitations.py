@@ -8,6 +8,7 @@ not the service layer directly, because the properties that matter here
 that boundary.
 """
 
+import smtplib
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
@@ -397,6 +398,27 @@ def test_accept_returns_the_same_body_for_unknown_expired_and_burned_tokens(auth
         assert response.json() == {"detail": INVITATION_INVALID_DETAIL}
 
 
+def test_accept_rejects_an_overlong_password_instead_of_crashing(authenticated_client: TestClient):
+    """bcrypt raises above 72 bytes, and hashing runs before the token check.
+
+    Without the schema guard, a long password reaches `hash_password` as the
+    first statement of a public, unauthenticated handler and becomes a 500 —
+    whatever the token was. 422 is the honest answer, and rejecting on length
+    alone leaks nothing the sender did not already know.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+
+    # Accented characters are two bytes each: 40 of them exceed 72 bytes while
+    # staying well under the 128-character cap.
+    long_password = "á" * 40
+    assert len(long_password) < 128
+    assert len(long_password.encode()) > 72
+
+    response = _accept(client, customer["portal_slug"], "cualquier-token", password=long_password)
+    assert response.status_code == 422
+
+
 def test_accept_rejects_a_token_from_another_portal_slug(authenticated_client: TestClient):
     client = authenticated_client
     customer_a = _make_client(client, "Cliente A")
@@ -408,3 +430,78 @@ def test_accept_rejects_a_token_from_another_portal_slug(authenticated_client: T
     wrong_slug = _accept(client, customer_b["portal_slug"], token)
     assert wrong_slug.status_code == 400
     assert wrong_slug.json()["detail"] == INVITATION_INVALID_DETAIL
+
+
+# --- Delivery outcome (D7) ----------------------------------------------------
+
+
+def test_email_delivery_failure_is_recorded_on_the_invitation(authenticated_client: TestClient, monkeypatch):
+    """D7: a background send that fails must not read back as "sent" by silence.
+
+    ``send_invitation_email`` (``services/invitations.py``) wraps the actual
+    delivery, catches any exception and writes ``delivery_error`` on the row;
+    a later ``GET /clients/{id}/departments`` read must then report
+    ``delivery == "failed"`` instead of repeating the create-time optimistic
+    guess. The fake provider raises synchronously, and this test suite's
+    ``TestClient`` runs ``BackgroundTasks`` inline before the HTTP call
+    returns (see ``test_smtp_provider_is_dispatched_through_background_tasks``
+    above), so the failure is already recorded by the time this test reads it
+    back.
+    """
+    from app.services import emails as emails_service
+
+    def _boom(_email: emails_service.Email) -> None:
+        raise smtplib.SMTPException("Connection refused")
+
+    monkeypatch.setattr(emails_service, "configured_provider", lambda: "smtp")
+    monkeypatch.setattr(emails_service, "_PROVIDERS", {"smtp": _boom, "none": emails_service._send_none})
+
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="rebota@example.com")
+
+    with SessionLocal() as db:
+        invitation = db.get(PortalInvitation, uuid.UUID(department["invitation"]["id"]))
+        assert invitation.delivery_error is not None
+        assert "Connection refused" in invitation.delivery_error
+        assert invitation.delivered_at is None
+
+    listing = client.get(f"/api/clients/{customer['id']}/departments")
+    assert listing.status_code == 200, listing.text
+    read_department = next(row for row in listing.json() if row["id"] == department["id"])
+    assert read_department["invitation"]["delivery"] == "failed"
+    assert read_department["invitation"]["accept_url"] is None
+
+
+# --- D5: deleting a department cascades to its pending invitation ------------
+
+
+def test_deleting_the_department_removes_its_pending_invitation(authenticated_client: TestClient):
+    """``department_id`` is CASCADE (D5), unlike ``portal_users``/``conversations``
+    which use SET NULL: a deleted department must not silently promote a
+    department-scoped pending invite into a client-wide one.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent_a = _make_agent(client, customer["id"], "Uno")
+    agent_b = _make_agent(client, customer["id"], "Dos")
+    # The first department created becomes the entry one automatically, so a
+    # second, non-entry department is what gets the invite and gets deleted —
+    # deleting the sole/entry department is rejected for an unrelated reason.
+    client.post(
+        f"/api/clients/{customer['id']}/departments",
+        json={"name": "Recepción", "agent_id": agent_a["id"]},
+    )
+    department = _department_with_invite(client, customer["id"], agent_b["id"], invite_email="borrada@example.com")
+
+    deleted = client.delete(f"/api/clients/{customer['id']}/departments/{department['id']}")
+    assert deleted.status_code == 204, deleted.text
+
+    with SessionLocal() as db:
+        assert (
+            db.query(PortalInvitation)
+            .filter(PortalInvitation.client_id == uuid.UUID(customer["id"]))
+            .count()
+            == 0
+        )

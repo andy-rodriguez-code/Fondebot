@@ -230,6 +230,9 @@ that client's portal. The portal must be **published** for the domain to serve.
 | `COOKIE_SAMESITE` | Backend | `lax` (default); `none` when the frontend and API are on different sites (requires `COOKIE_SECURE=true`). |
 | `ACCESS_TOKEN_MINUTES` | Backend | Session lifetime. |
 | `WHATSAPP_LOG_LEVEL` | Bridge | Log level; `silent` avoids exposing sensitive data. |
+| `EMAIL_PROVIDER` | Backend | `none` (default) sends no portal invitation e-mails — the link comes back in the API response instead. `smtp` sends it for real; requires the `SMTP_*` variables below. See [Invitation e-mail deliverability](portal-invitations-email-deliverability.md). |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS` | Backend | SMTP server and credentials when `EMAIL_PROVIDER=smtp`. |
+| `INVITATION_TOKEN_MINUTES` | Backend | How long a portal invitation link stays valid (24h default). |
 | `API_PORT`, `WEB_PORT`, `DB_PORT` | Host | Host ports (defaults `8000` / `3000` / `5432`). |
 | `BIND_HOST` | Host | Bind address: `127.0.0.1` (local) or `0.0.0.0` (expose directly). |
 

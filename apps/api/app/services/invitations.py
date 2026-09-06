@@ -9,14 +9,15 @@ huérfanas cuando alguien reenvía por error.
 
 ``send_invitation_email`` es la función NOMBRADA que ``BackgroundTasks``
 llama después de confirmar la transacción (nunca dentro de un ``async def``,
-ver ``services/emails.py``). PR4 la extiende para capturar el error y grabar
-``delivered_at``/``delivery_error`` en la fila; queda extraída a propósito
-para que ese cambio sea agregar comportamiento, no separar código que hoy
-vive inline en el router.
+ver ``services/emails.py``). Corre en un hilo de threadpool, no en el request
+que la encoló, así que abre su propia sesión con ``database.new_session()``
+en vez de reusar la que cerró el router — D7 (registrar el resultado real del
+envío, no asumir éxito por falta de excepción en el hilo principal).
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import timedelta
 
@@ -24,9 +25,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..database import new_session
 from ..models import Client, PortalInvitation, now_utc
 from ..security import generate_invitation_token, hash_invitation_token
 from .emails import Email, send_email
+
+logger = logging.getLogger(__name__)
+
+# app/models.py::PortalInvitation.delivery_error es String(200); un mensaje
+# más largo se corta acá para no chocar con el límite de la columna, y nunca
+# se guarda un traceback completo (podría arrastrar detalle de conexión que no
+# hace falta exponer en el panel).
+DELIVERY_ERROR_MAX_LENGTH = 200
 
 
 def issue_invitation(
@@ -82,15 +92,36 @@ def issue_invitation(
     return invitation, raw_token
 
 
-def send_invitation_email(email: Email) -> None:
+def send_invitation_email(invitation_id: uuid.UUID, email: Email) -> None:
     """Wrapper nombrado alrededor de ``send_email`` para el dispatch en segundo
     plano (Constraint: smtplib async ban — esto corre en el hilo de
     ``BackgroundTasks``, nunca en el event loop).
 
-    PR2 no captura el fallo: no hay todavía dónde dejar constancia (esa fila
-    es ``delivery_error``, que PR4 agrega). Starlette registra cualquier
-    excepción de una tarea en segundo plano en el log del proceso; nada de
-    esto revierte la invitación, que ya quedó confirmada antes de encolar el
-    envío.
+    A diferencia de ``send_email`` (que no traga excepciones a propósito),
+    este wrapper SÍ las captura: es el único lugar responsable de dejar
+    constancia (D7). Abre su propia sesión porque corre después de que la
+    request que encoló la tarea ya respondió y cerró la suya — reusar esa
+    sesión desde otro hilo, o llamar a ``SessionLocal()`` directo, es
+    exactamente lo que ``AGENTS.md``/``test_session_factory.py`` prohíben.
+    Si la fila ya no existe (por ejemplo, se borró la dependencia entre medio
+    — CASCADE, ver D5), no hay dónde escribir el resultado y no es un error:
+    simplemente no queda nadie a quien avisarle.
     """
-    send_email(email)
+    db = new_session()
+    try:
+        invitation = db.get(PortalInvitation, invitation_id)
+        if invitation is None:
+            return
+        try:
+            send_email(email)
+        except Exception as exc:  # noqa: BLE001 - cualquier fallo de entrega se registra, no se descarta
+            logger.error("No se pudo entregar la invitación %s: %s", invitation_id, exc)
+            invitation.delivery_error = f"{type(exc).__name__}: {exc}"[:DELIVERY_ERROR_MAX_LENGTH]
+            invitation.delivered_at = None
+        else:
+            invitation.delivered_at = now_utc()
+            invitation.delivery_error = None
+        invitation.updated_at = now_utc()
+        db.commit()
+    finally:
+        db.close()
