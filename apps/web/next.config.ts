@@ -19,6 +19,12 @@ const FRAME_ANCESTORS = { key: "Content-Security-Policy", value: "frame-ancestor
 // el dominio inalcanzable para quien ya la haya cacheado.
 const HSTS = { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" };
 
+// `Cache-Control` NO va acá, aunque sea el lugar donde uno lo buscaría: Next
+// pisa esa cabecera para las páginas al construir en producción, así que una
+// regla puesta acá queda escrita, se ve razonable y no hace nada. Se comprobó:
+// con la regla puesta, /clients seguía respondiendo `s-maxage=31536000`.
+// El no-store de las pantallas con sesión vive en proxy.ts.
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",

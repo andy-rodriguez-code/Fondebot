@@ -78,12 +78,29 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [isBare, pathname, router]);
 
+  // Red de seguridad para la flecha atrás. `no-store` (next.config.ts) ya
+  // desactiva la caché de atrás/adelante en los navegadores actuales, así que
+  // esto casi nunca se dispara — pero cuando un navegador igual restaura la
+  // página, no corre ningún efecto: revive el estado tal como estaba, incluida
+  // la sesión de quien ya se fue. Recargar es lo único que reinicia el árbol
+  // entero, y hace falta que sea el árbol entero: el portal guarda su sesión
+  // en su propia página, fuera de este componente.
+  useEffect(() => {
+    const onShow = (event: PageTransitionEvent) => {
+      if (event.persisted) window.location.reload();
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
+
   async function logout() {
     await api("/auth/logout", { method: "POST" });
     // The shell lives in the root layout and survives client-side navigation, so
     // the signed-out identity has to be dropped explicitly.
     setUser(null);
-    router.push("/login");
+    // `replace` y no `push`: apilar una entrada deja al panel justo detrás de
+    // la flecha atrás, que es exactamente el gesto que no tiene que devolverlo.
+    router.replace("/login");
     router.refresh();
   }
 
