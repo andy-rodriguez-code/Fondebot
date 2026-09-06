@@ -20,6 +20,10 @@
 			# Overwrite instead of appending — see docker/Caddyfile for why the
 			# backend must never see a caller-supplied X-Forwarded-For entry.
 			header_up X-Forwarded-For {http.request.remote.host}
+			# Sin esto el aviso en vivo del portal se junta en un buffer y sale
+			# en lote: "tiempo real" se convertiría en "con retraso" sin que
+			# nada falle a la vista. -1 manda cada evento apenas se escribe.
+			flush_interval -1
 		}
 	}
 	handle {
@@ -37,6 +41,10 @@ https:// {
 	handle /api/* {
 		reverse_proxy api:8000 {
 			header_up X-Forwarded-For {http.request.remote.host}
+			# Sin esto el aviso en vivo del portal se junta en un buffer y sale
+			# en lote: "tiempo real" se convertiría en "con retraso" sin que
+			# nada falle a la vista. -1 manda cada evento apenas se escribe.
+			flush_interval -1
 		}
 	}
 	handle {

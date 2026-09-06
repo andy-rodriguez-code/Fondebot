@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { pollIntervalFor, useLiveChanges } from "@/lib/live";
 import { useParams } from "next/navigation";
 import { BadgeCheck, Bot, Building2, CheckCircle2, Clock, Contact as ContactIcon, FileText, FlaskConical, Globe, Images, Inbox, LoaderCircle, LogOut, MessageCircle, MessageSquareText, Search, Send, ShieldCheck, UserRound } from "lucide-react";
 import { ContactsView } from "./contacts";
@@ -18,7 +19,8 @@ import { formatTime, formatWhen, isNearBottom, isSameOpenThread } from "@/lib/da
 import { useLanguage, useT } from "@/lib/i18n";
 import type { Attachment, Conversation, Message, PortalChannel, PortalPublic } from "@/types";
 
-const POLL_MS = 8000;
+// Los dos ritmos del refresco de respaldo viven en lib/live.ts, al lado de
+// la condición que elige entre ellos.
 
 function chime() {
   try {
@@ -162,6 +164,8 @@ function PortalInbox({ slug, portal, session, logout }: { slug: string; portal: 
   }, [tab, status, query]);
   const messagesRef = useRef<HTMLDivElement>(null);
   useEffect(() => { selectedIdRef.current = selected?.id ?? null; }, [selected]);
+  const offsetRef = useRef(offset);
+  useEffect(() => { offsetRef.current = offset; }, [offset]);
   const wasNearBottomRef = useRef(true);
   useEffect(() => {
     const el = messagesRef.current;
@@ -201,10 +205,13 @@ function PortalInbox({ slug, portal, session, logout }: { slug: string; portal: 
   }, [slug, buildParams, markRead, announceAssignments]);
 
   useEffect(() => { refresh().catch((err) => setError(messageFrom(err))); }, [refresh]);
+  const live = useLiveChanges(slug, useCallback(() => { if (offsetRef.current <= LIMIT) refresh().catch(() => {}); }, [refresh]));
   useEffect(() => {
-    const id = setInterval(() => { if (offset <= LIMIT) refresh().catch(() => {}); }, POLL_MS);
+    // El refresco no se apaga cuando el stream conecta: se hace lento. Sigue
+    // siendo la red que atrapa cualquier aviso que no haya llegado.
+    const id = setInterval(() => { if (offset <= LIMIT) refresh().catch(() => {}); }, pollIntervalFor(live));
     return () => clearInterval(id);
-  }, [refresh, offset]);
+  }, [refresh, offset, live]);
 
   async function loadMore() {
     if (!hasMore || loadingMore) return;

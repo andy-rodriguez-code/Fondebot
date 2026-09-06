@@ -10,6 +10,10 @@
 			# If you run another proxy in front of this gateway, replace this with
 			# that proxy's own client address.
 			header_up X-Forwarded-For {http.request.remote.host}
+			# Sin esto el aviso en vivo del portal se junta en un buffer y sale
+			# en lote: "tiempo real" se convertiría en "con retraso" sin que
+			# nada falle a la vista. -1 manda cada evento apenas se escribe.
+			flush_interval -1
 		}
 	}
 	handle {

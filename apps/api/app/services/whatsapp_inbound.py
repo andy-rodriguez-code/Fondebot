@@ -27,6 +27,7 @@ from .knowledge import build_system_prompt, retrieve_knowledge
 from .media import describe_image, transcribe_audio
 from .notifications import notify_needs_human
 from .providers import resolve_agent_credentials, resolve_provider_credentials
+from .realtime import publish as publish_change
 from .tools import run_completion
 from .usage import record_usage
 from .whatsapp import send_channel_message
@@ -216,6 +217,14 @@ async def process_inbound(
             kind=inbound.media_kind,
         )
     db.commit()
+    # El mensaje del visitante ya está guardado. Este es el aviso que de verdad
+    # importa: es lo que hace aparecer algo nuevo en la pantalla de quien
+    # atiende, sin esperar al refresco.
+    publish_change(
+        client_id=conversation.client_id,
+        department_id=conversation.department_id,
+        conversation_id=conversation.id,
+    )
     if conversation.mode == "human":
         # Alguien tomó esta conversación, así que no va a responder nadie salvo
         # que una persona la vea. Este es el momento en que tiene que sonar un
@@ -236,6 +245,15 @@ async def process_inbound(
         )
         if chosen and route(db, conversation, chosen, actor=inbound.sender_name):
             db.commit()
+            # Segundo aviso, y no es redundante: el de arriba salió con la
+            # dependencia de antes, porque el ruteo pasa recién acá. Sin este,
+            # la dependencia que acaba de quedarse con el caso no se entera de
+            # que le llegó hasta el refresco de respaldo.
+            publish_change(
+                client_id=conversation.client_id,
+                department_id=conversation.department_id,
+                conversation_id=conversation.id,
+            )
         elif await send_menu(db, conversation, channel, options):
             # El menú es la respuesta de este turno. Nadie más contesta hasta
             # que el contacto elija, o escriba algo que atiende recepción.
@@ -494,5 +512,10 @@ async def _debounced_reply(conversation_id: uuid.UUID) -> None:
             if outbound:
                 outbound.external_message_id = external_id
                 db.commit()
+        publish_change(
+            client_id=conversation.client_id,
+            department_id=conversation.department_id,
+            conversation_id=conversation.id,
+        )
     finally:
         db.close()
