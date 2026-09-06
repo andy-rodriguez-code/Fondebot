@@ -118,9 +118,21 @@ const en = {
       save: "Save",
     },
   },
+  board: {
+    columnAi: "The AI is answering",
+    columnActive: "In progress",
+    columnDone: "Done",
+    empty: "Nothing here",
+    unclaimed: "No owner — take it",
+    moveAi: "Back to the AI",
+    moveActive: "Take it",
+    moveDone: "Mark as done",
+    doneIsFinal: "A conversation that is done stays done. It comes back only if the contact writes again.",
+  },
   inbox: {
     nav: {
       inbox: "Inbox",
+      board: "Board",
       contacts: "Contacts",
       templates: "WhatsApp templates",
       agents: "Agents",
@@ -311,9 +323,21 @@ const es: typeof en = {
       save: "Guardar",
     },
   },
+  board: {
+    columnAi: "La IA responde",
+    columnActive: "En curso",
+    columnDone: "Terminadas",
+    empty: "Nada por acá",
+    unclaimed: "Sin dueño — tomala",
+    moveAi: "Devolver a la IA",
+    moveActive: "Tomarla",
+    moveDone: "Marcar terminada",
+    doneIsFinal: "Una conversación terminada queda terminada. Vuelve solo si el contacto escribe de nuevo.",
+  },
   inbox: {
     nav: {
       inbox: "Inbox",
+      board: "Tablero",
       contacts: "Contactos",
       templates: "Plantillas de WhatsApp",
       agents: "Agentes",
