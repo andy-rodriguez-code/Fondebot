@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -491,6 +492,11 @@ class PortalLoginRequest(BaseModel):
     password: str
 
 
+class PortalInvitationAccept(BaseModel):
+    token: str = Field(min_length=1)
+    password: str = Field(min_length=8, max_length=128)
+
+
 class PortalPublicOut(BaseModel):
     client_name: str
     portal_title: str
@@ -509,6 +515,26 @@ class PortalSessionOut(BaseModel):
     # The person behind the session; absent on sessions that predate portal users.
     user_id: uuid.UUID | None = None
     user_name: str | None = None
+
+
+class InvitationOut(BaseModel):
+    """Lo que ve la persona admin sobre una invitación pendiente (o vencida).
+
+    ``accept_url`` solo viaja acá cuando no hay proveedor de mail configurado
+    (``delivery == "manual"``): con e-mail activo queda explícitamente en
+    ``None`` — no una clave ausente — para que el frontend tenga una sola
+    rama. ``"failed"`` solo aparece en una lectura posterior de
+    ``GET /clients/{id}/departments``, nunca en la respuesta de creación: el
+    envío en segundo plano corre después de que esa respuesta ya salió.
+    """
+
+    id: uuid.UUID
+    email: str
+    expires_at: datetime
+    delivery: Literal["sent", "manual", "failed"]
+    accept_url: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DashboardOut(BaseModel):

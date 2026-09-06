@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..config import get_settings
 from ..database import get_db
-from ..models import Agency, Agent, Client, Contact, Conversation, Department, Message, PortalUser, WhatsAppChannel, WhatsAppCloudChannel, now_utc
-from ..ratelimit import login_rate_limit, public_asset_rate_limit
+from ..models import Agency, Agent, Client, Contact, Conversation, Department, Message, PortalInvitation, PortalUser, WhatsAppChannel, WhatsAppCloudChannel, now_utc
+from ..ratelimit import invitation_rate_limit, login_rate_limit, public_asset_rate_limit
 from ..schemas import (
     AgentSummary,
     ContactCreate,
@@ -24,13 +24,14 @@ from ..schemas import (
     ConversationStatusUpdate,
     ConversationOut,
     PortalInboxSummary,
+    PortalInvitationAccept,
     PortalLoginRequest,
     PortalMemberOut,
     PortalPublicOut,
     PortalSessionOut,
     SendMessageRequest,
 )
-from ..security import create_portal_token, decode_portal_token, verify_password
+from ..security import create_portal_token, decode_portal_token, hash_invitation_token, hash_password, verify_invitation_token, verify_password
 from ..services.contacts import display_name, normalize_phone, rename_conversations
 from ..services.whatsapp_templates import (
     create_template,
@@ -253,6 +254,80 @@ def portal_login(slug: str, payload: PortalLoginRequest, response: Response, db:
 @router.post("/{slug}/logout", status_code=status.HTTP_204_NO_CONTENT)
 def portal_logout(response: Response):
     response.delete_cookie("portal_access_token", path="/")
+
+
+# Un solo cuerpo y un solo status para las cuatro formas de fallar (token
+# inexistente, vencido, ya usado, o de otro slug): distinguirlas le regalaría
+# a quien ataca justo lo que este endpoint tiene que negarle (Spec:
+# Enumeration-Resistant Accept Endpoint).
+INVITATION_INVALID_DETAIL = "This invitation link is no longer valid. Ask for a new one."
+
+
+def _invitation_invalid() -> HTTPException:
+    return HTTPException(status_code=400, detail=INVITATION_INVALID_DETAIL)
+
+
+@router.post(
+    "/{slug}/invitations/accept", response_model=PortalSessionOut, dependencies=[Depends(invitation_rate_limit)]
+)
+def accept_invitation(slug: str, payload: PortalInvitationAccept, response: Response, db: Session = Depends(get_db)):
+    """Convierte una invitación pendiente en una cuenta del portal.
+
+    D3: el hash de la contraseña se calcula ACÁ ARRIBA, antes de mirar el
+    token, sea cual sea su suerte. `hash_password` es el único costo grande de
+    esta ruta; pagarlo solo en el camino feliz volvería el tiempo de respuesta
+    un cronómetro que delata si el token existe (test
+    `test_accept_pays_the_password_hashing_cost_on_every_path`) — no hay
+    ningún `return` temprano permitido antes de esta línea.
+    """
+    password_hash = hash_password(payload.password)
+
+    client = db.scalar(select(Client).where(Client.portal_slug == slug))
+    token_hash = hash_invitation_token(payload.token)
+    invitation = db.scalar(select(PortalInvitation).where(PortalInvitation.token_hash == token_hash))
+
+    if (
+        client is None
+        or invitation is None
+        or invitation.client_id != client.id
+        or invitation.accepted_at is not None
+        or invitation.expires_at < now_utc()
+        or not verify_invitation_token(payload.token, invitation.token_hash)
+    ):
+        raise _invitation_invalid()
+
+    portal_user = PortalUser(
+        client_id=invitation.client_id,
+        department_id=invitation.department_id,
+        email=invitation.email,
+        name=invitation.name,
+        password_hash=password_hash,
+        is_active=True,
+    )
+    invitation.accepted_at = now_utc()
+    db.add(portal_user)
+    db.commit()
+    db.refresh(portal_user)
+
+    settings = get_settings()
+    response.set_cookie(
+        key="portal_access_token",
+        value=create_portal_token(str(client.id), client.portal_slug, str(portal_user.id)),
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        max_age=settings.access_token_minutes * 60,
+        path="/",
+    )
+    agency = db.get(Agency, client.agency_id)
+    return {
+        "client_id": client.id,
+        "client_name": client.name,
+        "portal_slug": client.portal_slug,
+        "agency_name": agency.name,
+        "user_id": portal_user.id,
+        "user_name": portal_user.name.strip() or portal_user.email,
+    }
 
 
 @router.get("/{slug}/me", response_model=PortalSessionOut)

@@ -1,19 +1,26 @@
 """Invitation tokens: single-use, hashed at rest, never the plaintext.
 
-This slice lays only the storage foundation — the table, the model, and the
-token helpers in ``app/security.py``. There is no HTTP endpoint yet (issuing,
-resending and accepting land later), so these exercise the pieces directly
-rather than through a router.
+PR1 laid only the storage foundation (table, model, token helpers). This slice
+adds the HTTP surface: issuing an invitation from department creation,
+resending it, and the public accept endpoint — exercised through the router,
+not the service layer directly, because the properties that matter here
+(constant work, identical failure body, background dispatch) only exist at
+that boundary.
 """
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
+import app.routers.portal as portal_router
 from app.database import SessionLocal
-from app.models import PortalInvitation
+from app.models import PortalInvitation, PortalUser
+from app.routers.portal import INVITATION_INVALID_DETAIL
 from app.security import generate_invitation_token, hash_invitation_token, verify_invitation_token
+
+PASSWORD = "una-contrasena-larga"
 
 
 def _make_client(client: TestClient, name: str = "Cliente Demo") -> dict:
@@ -21,6 +28,43 @@ def _make_client(client: TestClient, name: str = "Cliente Demo") -> dict:
         "/api/clients",
         json={"name": name, "industry": "", "description": "", "general_context": "", "is_active": True},
     ).json()
+
+
+def _make_agent(client: TestClient, client_id: str, name: str = "Agente") -> dict:
+    client.put("/api/providers/openai", json={"api_key": "secret"})
+    return client.post(
+        "/api/agents",
+        json={
+            "client_id": client_id,
+            "provider": "openai",
+            "model": "gpt-4.1-mini",
+            "name": name,
+            "description": "",
+            "instructions": "",
+            "personality": "",
+            "is_active": True,
+        },
+    ).json()
+
+
+def _department_with_invite(
+    client: TestClient, client_id: str, agent_id: str, *, invite_email: str | None, invite_name: str = ""
+) -> dict:
+    payload = {"name": "Soporte", "agent_id": agent_id}
+    if invite_email:
+        payload["invite_email"] = invite_email
+        payload["invite_name"] = invite_name
+    response = client.post(f"/api/clients/{client_id}/departments", json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _token_from_accept_url(accept_url: str) -> str:
+    return parse_qs(urlparse(accept_url).query)["token"][0]
+
+
+def _accept(client: TestClient, slug: str, token: str, password: str = PASSWORD):
+    return client.post(f"/api/portal/{slug}/invitations/accept", json={"token": token, "password": password})
 
 
 def test_token_is_urlsafe_and_hashed_at_rest(authenticated_client: TestClient):
@@ -55,3 +99,312 @@ def test_token_is_urlsafe_and_hashed_at_rest(authenticated_client: TestClient):
 
     assert verify_invitation_token(raw_token, token_hash) is True
     assert verify_invitation_token("un-token-distinto-cualquiera", token_hash) is False
+
+
+# --- RED-first guards --------------------------------------------------------
+#
+# These two are written BEFORE the property they guard is wired, and stay
+# first in this file for the same reason: a test written after the code
+# already works proves nothing about either property — it would pass against
+# a broken implementation just as easily. Both were red against the router
+# before tasks 2.4/2.6 existed.
+
+
+def test_accept_pays_the_password_hashing_cost_on_every_path(authenticated_client: TestClient, monkeypatch):
+    """D3: ``hash_password`` must run even for a token that never existed.
+
+    Hashing only on the success path turns the endpoint into a stopwatch: the
+    response time alone would tell an attacker whether a token is real. A wall
+    clock is not a reliable assertion in CI, so this spies on the call
+    instead — the honest proxy the design document names for this guarantee.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+
+    real_hash_password = portal_router.hash_password
+    calls: list[str] = []
+
+    def _spy(password: str) -> str:
+        calls.append(password)
+        return real_hash_password(password)
+
+    monkeypatch.setattr(portal_router, "hash_password", _spy)
+
+    response = _accept(client, customer["portal_slug"], "un-token-que-nunca-existio-000000000")
+
+    assert response.status_code == 400
+    assert calls == ["una-contrasena-larga"]
+
+
+def test_smtp_provider_is_dispatched_through_background_tasks(authenticated_client: TestClient, monkeypatch):
+    """``smtplib`` must never run on the event loop (Constraint: smtplib async
+    ban). ``asyncio.get_running_loop()`` only raises ``RuntimeError`` when the
+    calling thread has no running loop — proof this ran on a worker thread via
+    ``BackgroundTasks``, not inline inside the ``async def`` route.
+    """
+    import asyncio
+
+    from app.services import emails as emails_service
+
+    ran_off_the_loop = {"value": False}
+
+    def _fake_smtp(email: emails_service.Email) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            ran_off_the_loop["value"] = True
+
+    monkeypatch.setattr(emails_service, "configured_provider", lambda: "smtp")
+    monkeypatch.setattr(emails_service, "_PROVIDERS", {"smtp": _fake_smtp, "none": emails_service._send_none})
+
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="smtp@example.com")
+
+    assert department["invitation"]["delivery"] == "sent"
+    assert department["invitation"]["accept_url"] is None
+    assert ran_off_the_loop["value"] is True
+
+
+# --- Department creation ------------------------------------------------------
+
+
+def test_department_create_without_email_creates_no_invitation(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email=None)
+
+    assert department["invitation"] is None
+    with SessionLocal() as db:
+        assert db.query(PortalInvitation).count() == 0
+
+
+def test_department_create_with_email_returns_manual_link_when_provider_is_none(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+
+    department = _department_with_invite(
+        client, customer["id"], agent["id"], invite_email="invitada@example.com", invite_name="Invitada"
+    )
+
+    invitation = department["invitation"]
+    assert invitation["email"] == "invitada@example.com"
+    assert invitation["delivery"] == "manual"
+    assert invitation["accept_url"] is not None
+    assert f"/portal/{customer['portal_slug']}/invite?token=" in invitation["accept_url"]
+
+
+def test_inviting_an_existing_active_portal_user_returns_409(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    created = client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "miembro@example.com", "password": PASSWORD, "name": "Miembro"},
+    )
+    assert created.status_code == 201, created.text
+
+    conflict = client.post(
+        f"/api/clients/{customer['id']}/departments",
+        json={"name": "Otra dependencia", "agent_id": agent["id"], "invite_email": "miembro@example.com"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "That e-mail is already on this portal"
+
+    # Same address on a DIFFERENT client is allowed: uq_portal_users_client_email
+    # is scoped per client (Spec: Duplicate Portal-User Handling).
+    other = _make_client(client, "Otro cliente")
+    other_agent = _make_agent(client, other["id"])
+    allowed = client.post(
+        f"/api/clients/{other['id']}/departments",
+        json={"name": "Soporte", "agent_id": other_agent["id"], "invite_email": "miembro@example.com"},
+    )
+    assert allowed.status_code == 201, allowed.text
+
+
+def test_only_one_pending_invitation_per_email_per_client(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent_a = _make_agent(client, customer["id"], "Uno")
+    agent_b = _make_agent(client, customer["id"], "Dos")
+
+    _department_with_invite(client, customer["id"], agent_a["id"], invite_email="doble@example.com")
+    second = client.post(
+        f"/api/clients/{customer['id']}/departments",
+        json={"name": "Otra dependencia", "agent_id": agent_b["id"], "invite_email": "doble@example.com"},
+    )
+    assert second.status_code == 201, second.text
+
+    with SessionLocal() as db:
+        rows = (
+            db.query(PortalInvitation)
+            .filter(PortalInvitation.client_id == uuid.UUID(customer["id"]), PortalInvitation.email == "doble@example.com")
+            .all()
+        )
+        assert len(rows) == 1
+        assert str(rows[0].department_id) == second.json()["id"]
+
+
+def test_reinviting_invalidates_the_previous_link(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="reinvitada@example.com")
+    old_token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    resent = client.post(f"/api/clients/{customer['id']}/departments/{department['id']}/invitations")
+    assert resent.status_code == 201, resent.text
+    new_token = _token_from_accept_url(resent.json()["accept_url"])
+    assert new_token != old_token
+
+    assert _accept(client, customer["portal_slug"], old_token).status_code == 400
+    assert _accept(client, customer["portal_slug"], new_token).status_code == 200
+
+
+# --- Accepting an invitation ---------------------------------------------------
+
+
+def test_accept_creates_portal_user_scoped_to_the_department(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="nueva@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    accepted = _accept(client, customer["portal_slug"], token)
+    assert accepted.status_code == 200, accepted.text
+
+    with SessionLocal() as db:
+        portal_user = db.query(PortalUser).filter(PortalUser.email == "nueva@example.com").one()
+        assert str(portal_user.client_id) == customer["id"]
+        assert str(portal_user.department_id) == department["id"]
+        assert portal_user.is_active is True
+        invitation = db.get(PortalInvitation, uuid.UUID(department["invitation"]["id"]))
+        assert invitation.accepted_at is not None
+
+
+def test_accept_sets_the_portal_cookie_and_returns_a_session(authenticated_client: TestClient):
+    """The session an accept hands back only opens a portal that is published.
+
+    So this models inviting the *second* person: a portal cannot be published
+    until it has someone who can sign in, and that first someone is created by
+    accepting an invitation. Asserting a working session on a client whose
+    portal was never enabled would be asserting something the product does not
+    promise — `_portal_client` refuses an unpublished portal, and rightly so.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "primera@example.com", "password": PASSWORD, "name": "Primera"},
+    )
+    published = client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True})
+    assert published.status_code == 200, published.text
+
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="sesion@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    accepted = _accept(client, customer["portal_slug"], token)
+    assert accepted.status_code == 200
+    assert accepted.json()["user_id"] is not None
+    assert "portal_access_token" in accepted.cookies
+
+    me = client.get(f"/api/portal/{customer['portal_slug']}/me")
+    assert me.status_code == 200
+    assert me.json()["user_id"] == accepted.json()["user_id"]
+
+
+def test_accept_works_before_the_portal_is_published(authenticated_client: TestClient):
+    """The first person in has to be able to accept, or nothing ever starts.
+
+    Publishing a portal requires an active user and the only way to get one is
+    to accept an invitation, so requiring a published portal here would
+    deadlock the whole flow. The account is created and the invitation burned;
+    the session it returns simply opens nothing until an admin publishes.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="primera@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    assert _accept(client, customer["portal_slug"], token).status_code == 200
+    with SessionLocal() as db:
+        assert db.query(PortalUser).filter(PortalUser.email == "primera@example.com").one().is_active is True
+
+    # And now the portal can be published, which it could not be a moment ago.
+    published = client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True})
+    assert published.status_code == 200, published.text
+
+
+def test_accept_is_single_use(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="unica@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    assert _accept(client, customer["portal_slug"], token).status_code == 200
+    second = _accept(client, customer["portal_slug"], token, password="otra-contrasena-larga")
+    assert second.status_code == 400
+    assert second.json()["detail"] == INVITATION_INVALID_DETAIL
+
+
+def test_accept_refuses_an_expired_token(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="vencida@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    with SessionLocal() as db:
+        invitation = db.get(PortalInvitation, uuid.UUID(department["invitation"]["id"]))
+        invitation.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+
+    expired = _accept(client, customer["portal_slug"], token)
+    assert expired.status_code == 400
+    assert expired.json()["detail"] == INVITATION_INVALID_DETAIL
+
+
+def test_accept_returns_the_same_body_for_unknown_expired_and_burned_tokens(authenticated_client: TestClient):
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+
+    unknown = _accept(client, customer["portal_slug"], "un-token-que-nunca-existio-123456789")
+
+    expired_dept = _department_with_invite(client, customer["id"], agent["id"], invite_email="vencida2@example.com")
+    expired_token = _token_from_accept_url(expired_dept["invitation"]["accept_url"])
+    with SessionLocal() as db:
+        row = db.get(PortalInvitation, uuid.UUID(expired_dept["invitation"]["id"]))
+        row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    expired = _accept(client, customer["portal_slug"], expired_token)
+
+    burned_dept = _department_with_invite(client, customer["id"], agent["id"], invite_email="quemada@example.com")
+    burned_token = _token_from_accept_url(burned_dept["invitation"]["accept_url"])
+    assert _accept(client, customer["portal_slug"], burned_token).status_code == 200
+    burned = _accept(client, customer["portal_slug"], burned_token, password="otra-contrasena-larga")
+
+    for response in (unknown, expired, burned):
+        assert response.status_code == 400
+        assert response.json() == {"detail": INVITATION_INVALID_DETAIL}
+
+
+def test_accept_rejects_a_token_from_another_portal_slug(authenticated_client: TestClient):
+    client = authenticated_client
+    customer_a = _make_client(client, "Cliente A")
+    customer_b = _make_client(client, "Cliente B")
+    agent_a = _make_agent(client, customer_a["id"])
+    department = _department_with_invite(client, customer_a["id"], agent_a["id"], invite_email="cruzada@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    wrong_slug = _accept(client, customer_b["portal_slug"], token)
+    assert wrong_slug.status_code == 400
+    assert wrong_slug.json()["detail"] == INVITATION_INVALID_DETAIL
