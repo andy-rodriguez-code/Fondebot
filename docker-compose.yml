@@ -45,6 +45,8 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
+      # El stack local trae pytest y la suite; la imagen publicada, no.
+      target: dev
     image: ${OPENLIVERY_IMAGE_PREFIX:-ghcr.io/sarrazola/openlivery}-api:${OPENLIVERY_VERSION:-latest}
     container_name: openlivery_api
     env_file:

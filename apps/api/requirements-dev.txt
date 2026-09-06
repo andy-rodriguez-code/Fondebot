@@ -1,0 +1,6 @@
+# Lo que hace falta para correr los tests, y solo eso. La imagen que se
+# publica no lo instala: se instala en el stack local, porque `make test`
+# corre pytest adentro del contenedor que ya esta levantado, contra la misma
+# base y la misma configuracion que usa la app.
+-r requirements.txt
+pytest==8.4.1
