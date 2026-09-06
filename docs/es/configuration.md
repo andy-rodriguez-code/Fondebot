@@ -103,3 +103,22 @@ suele pasar desapercibida:
   intentos por minuto y por IP— es lo que le pone precio a probar.
 
 Con el valor por defecto ninguna de las dos aplica.
+
+## Retención de adjuntos
+
+`message_attachments` es la única tabla que crece sin techo con el uso: cada
+imagen y cada nota de voz que manda un contacto se guarda entera. Los logos son
+uno por agencia, y los PDFs los sube quien administra a propósito; esto no.
+
+| Variable | Qué hace | Por defecto |
+| --- | --- | --- |
+| `ATTACHMENT_RETENTION_DAYS` | Cuántos días se guardan los binarios de imágenes y notas de voz. En `0` no se borra nada | `0` |
+
+**Viene apagada a propósito.** Actualizar la aplicación no puede empezar a
+borrarle datos a alguien que no lo pidió. Encenderla no exige reiniciar: el
+barrido corre igual y toma el valor nuevo en la siguiente vuelta, cada seis
+horas.
+
+Se borra el archivo, no la conversación: el mensaje se queda con su texto y su
+transcripción, así que el caso se sigue leyendo entero. Lo único que falta
+después es el archivo original.

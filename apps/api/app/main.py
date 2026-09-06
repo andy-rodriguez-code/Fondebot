@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import new_session
+from .services.attachments import purge_attachments
 from .services.conversation_state import resolve_idle_ai_conversations
 from .services.error_log import purge_error_events, record_error
 from .routers import (
@@ -55,6 +56,31 @@ async def _auto_resolve_loop() -> None:
             record_error(source="conversations.auto_resolve", capture_kind="explicit", exc=exc)
 
 
+# Los adjuntos se barren con menos frecuencia que los errores: son muchos menos
+# eventos, y cada barrido toca la tabla mas pesada de la base.
+ATTACHMENT_SWEEP_SECONDS = 6 * 60 * 60
+
+
+async def _attachment_purge_loop() -> None:
+    """Aplica la ventana de retencion de imagenes y notas de voz.
+
+    Tarea aparte del barrido del registro de errores por la misma razon que ese
+    esta aparte del auto-resolve: dos retenciones distintas no pueden quedar
+    atadas a que la otra este configurada. Con la ventana en 0 —el valor por
+    defecto— este bucle no borra nada, pero sigue corriendo, asi que encenderla
+    no pide reiniciar nada.
+    """
+    while True:
+        await asyncio.sleep(ATTACHMENT_SWEEP_SECONDS)
+        try:
+            with new_session() as db:
+                purge_attachments(db, days=get_settings().attachment_retention_days)
+        except Exception:
+            # Igual que el barrido de errores: quedarse sin barrer una vuelta es
+            # preferible a matar la tarea y no volver a barrer nunca.
+            logger.exception("attachment retention sweep failed")
+
+
 async def _error_log_purge_loop() -> None:
     """Purga ``error_events`` por ventana de tiempo y tope de filas, mientras la
     app viva. Tarea separada de ``_auto_resolve_loop``: la retención del
@@ -79,12 +105,14 @@ async def _error_log_purge_loop() -> None:
 async def lifespan(_: FastAPI):
     sweeper = asyncio.create_task(_auto_resolve_loop()) if settings.auto_resolve_after_hours > 0 else None
     purger = asyncio.create_task(_error_log_purge_loop())
+    attachment_purger = asyncio.create_task(_attachment_purge_loop())
     try:
         yield
     finally:
         if sweeper:
             sweeper.cancel()
         purger.cancel()
+        attachment_purger.cancel()
 
 
 class ErrorCaptureMiddleware:

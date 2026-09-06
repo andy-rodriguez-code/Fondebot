@@ -7,12 +7,13 @@ uses the text resolved into ``Message.llm_content`` at ingestion time.
 
 import re
 import uuid
+from datetime import timedelta
 
 from fastapi import HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from ..models import Conversation, Message, MessageAttachment
+from ..models import Conversation, Message, MessageAttachment, now_utc
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
@@ -145,3 +146,28 @@ def attachment_response(attachment: MessageAttachment) -> Response:
 def llm_text(message: Message) -> str:
     """The text the LLM should see for a stored message."""
     return message.llm_content or message.content
+
+
+def purge_attachments(db: Session, *, days: int) -> int:
+    """Borra los binarios de los adjuntos mas viejos que la ventana dada.
+
+    Esta es la unica tabla que crece sin techo con el uso: cada imagen y cada
+    nota de voz que manda un contacto se guarda entera, para siempre. Los logos
+    son uno por agencia y los PDFs los sube quien administra a proposito; esto
+    no.
+
+    Se borra la fila y no solo sus bytes: ``data`` es NOT NULL, asi que vaciarla
+    pediria una migracion para ganar exactamente nada. El mensaje se queda con
+    su texto y su transcripcion, que es lo que hace falta para leer la
+    conversacion despues.
+
+    ``days`` en 0 o menos no borra nada. Ese es el valor por defecto a
+    proposito: actualizar la aplicacion no puede empezar a borrar datos de
+    alguien sin que lo haya pedido.
+    """
+    if days <= 0:
+        return 0
+    cutoff = now_utc() - timedelta(days=days)
+    deleted = db.execute(delete(MessageAttachment).where(MessageAttachment.created_at < cutoff)).rowcount or 0
+    db.commit()
+    return deleted
