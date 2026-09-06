@@ -31,7 +31,11 @@ QUEUE_SIZE = 32
 HEARTBEAT_SECONDS = 20
 
 
-@dataclass
+# `eq=False` no es un detalle: el `__eq__` que genera un dataclass pone
+# `__hash__ = None`, y sin hash este objeto no entra en el set de abajo. Además
+# la identidad es la comparación que corresponde, porque dos personas de la
+# misma dependencia son dos conexiones distintas, no la misma.
+@dataclass(eq=False)
 class Subscriber:
     client_id: uuid.UUID
     # None significa que ve todo el cliente, igual que en `_visible`.

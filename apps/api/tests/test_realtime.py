@@ -125,13 +125,14 @@ def test_a_quiet_stream_sends_a_heartbeat(monkeypatch):
     assert asyncio.run(scenario()) == ": keep-alive\n\n"
 
 
-def test_an_unknown_portal_never_opens_a_stream(client: TestClient):
+def test_an_anonymous_request_never_opens_a_stream(client: TestClient):
     """Las dependencias corren antes de que empiece a salir el stream.
 
-    Un endpoint que devuelve `StreamingResponse` sigue pasando por
-    `_portal_client`: si no fuera así, un slug cualquiera abriría una conexión
-    viva contra el bus antes de que nadie revise quién es.
+    Un endpoint que devuelve `StreamingResponse` sigue pasando por la
+    autenticación del portal: si no fuera así, cualquiera abriría una conexión
+    viva contra el bus antes de que nadie revise quién es. Sin sesión responde
+    401 —antes incluso de mirar si el slug existe— y no queda nadie suscripto.
     """
     response = client.get("/api/portal/no-existe/events")
-    assert response.status_code == 404
+    assert response.status_code == 401
     assert realtime.subscriber_count() == 0
