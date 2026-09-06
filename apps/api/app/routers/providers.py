@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
+from ..services import audit
 from ..models import ProviderCredential, User
 from ..schemas import ProviderKeyUpdate, ProviderOut
 from ..security import decrypt_secret, encrypt_secret, mask_secret
@@ -54,6 +55,16 @@ def set_provider_key(provider: str, payload: ProviderKeyUpdate, db: Session = De
     else:
         credential = ProviderCredential(agency_id=user.agency_id, provider=provider, encrypted_api_key=encrypt_secret(payload.api_key))
         db.add(credential)
+    # Antes del commit y en la misma sesion: la fila de auditoria y el cambio
+    # que describe entran juntos, o no entra ninguno.
+    audit.record(
+        db,
+        agency_id=user.agency_id,
+        actor=user,
+        action=audit.PROVIDER_CREDENTIALS_CHANGED,
+        target_type="provider",
+        target_label=provider,
+    )
     db.commit()
     return _out(provider, credential)
 
@@ -64,6 +75,14 @@ def delete_provider_key(provider: str, db: Session = Depends(get_db), user: User
     credential = _credential(db, user, provider)
     if credential:
         db.delete(credential)
+        audit.record(
+            db,
+            agency_id=user.agency_id,
+            actor=user,
+            action=audit.PROVIDER_CREDENTIALS_REMOVED,
+            target_type="provider",
+            target_label=provider,
+        )
         db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

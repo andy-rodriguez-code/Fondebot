@@ -707,6 +707,24 @@ class WhatsAppOutboundConfirm(BaseModel):
     external_message_id: str = Field(min_length=1, max_length=255)
 
 
+class AuditEntryOut(ORMModel):
+    """Espejo de lectura de ``AuditLog``.
+
+    ``agency_id`` no se serializa: el endpoint ya filtra por la agencia de quien
+    pregunta, así que devolverlo solo agregaría un uuid de tenant a una
+    respuesta que no lo necesita.
+    """
+
+    id: uuid.UUID
+    created_at: datetime
+    actor_type: str
+    actor_label: str
+    action: str
+    target_type: str
+    target_id: uuid.UUID | None
+    target_label: str
+
+
 class ErrorEventOut(ORMModel):
     """Espejo de lectura de ``ErrorEvent``. ``agency_id`` nunca se serializa:
     ``is_global`` (calculado en el router) alcanza para que la página marque

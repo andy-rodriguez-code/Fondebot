@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import get_settings
 from ..database import get_db
 from ..deps import get_current_user
+from ..services import audit
 from ..models import Agent, AgentQA, Client, KnowledgeDocument, User, WhatsAppChannel
 from ..schemas import AgentCreate, AgentOut, AgentUpdate, DocumentOut, ManualContextRequest, QAPairCreate, QAPairOut
 from ..services.knowledge import embed_document_chunks
@@ -72,8 +73,22 @@ def update_agent(agent_id: uuid.UUID, payload: AgentUpdate, db: Session = Depend
             detail="This agent is assigned to WhatsApp. Assign another agent to the channel before changing its client.",
         )
     _validate_client(db, user, client_id)
+    # Se mira ANTES de asignar: despues, el valor viejo ya no existe para
+    # comparar, y registrar cada PATCH incluyendo los que no tocan las
+    # instrucciones llenaria el registro de ruido.
+    instructions_changed = "instructions" in values and values["instructions"] != agent.instructions
     for key, value in values.items():
         setattr(agent, key, value)
+    if instructions_changed:
+        audit.record(
+            db,
+            agency_id=user.agency_id,
+            actor=user,
+            action=audit.AGENT_INSTRUCTIONS_CHANGED,
+            target_type="agent",
+            target_id=agent.id,
+            target_label=agent.name,
+        )
     db.commit()
     return _agent(db, user, agent_id)
 

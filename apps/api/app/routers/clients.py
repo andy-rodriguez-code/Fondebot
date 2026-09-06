@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..deps import get_current_user
+from ..services import audit
 from ..models import Client, Department, PortalUser, PushDevice, User, new_domain_token
 from ..schemas import (
     ClientCreate,
@@ -280,6 +281,16 @@ def create_portal_user(
         department_id=payload.department_id,
     )
     db.add(portal_user)
+    db.flush()
+    audit.record(
+        db,
+        agency_id=user.agency_id,
+        actor=user,
+        action=audit.PORTAL_USER_CREATED,
+        target_type="portal_user",
+        target_id=portal_user.id,
+        target_label=portal_user.email,
+    )
     db.commit()
     db.refresh(portal_user)
     return _portal_user_out(db, portal_user)
@@ -320,6 +331,15 @@ def update_portal_user(
         values["name"] = str(values["name"]).strip()
     for key, value in values.items():
         setattr(portal_user, key, value)
+    audit.record(
+        db,
+        agency_id=user.agency_id,
+        actor=user,
+        action=audit.PORTAL_USER_UPDATED,
+        target_type="portal_user",
+        target_id=portal_user.id,
+        target_label=portal_user.email,
+    )
     db.commit()
     db.refresh(portal_user)
     return _portal_user_out(db, portal_user)
