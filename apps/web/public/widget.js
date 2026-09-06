@@ -14,6 +14,24 @@
   frame.src = origin + "/widget/" + encodeURIComponent(agent);
   frame.title = "Chat";
   frame.setAttribute("allow", "clipboard-write; microphone");
+  // Lo que este iframe NO puede hacer en el sitio que lo hospeda. Lo que gana
+  // quien nos embebe es que el widget no pueda sacarle a sus visitantes de su
+  // propia página: sin allow-top-navigation, no puede navegar al padre.
+  // Tampoco abre ventanas ni modales, porque no los usa.
+  //
+  // Los cuatro permisos que sí van, y por qué cada uno:
+  //   allow-scripts       la página del widget es una app de React
+  //   allow-same-origin   sin esto queda con origen opaco: no puede llamar a
+  //                       su propia API, y el postMessage de más abajo llegaría
+  //                       con origin "null", que este mismo archivo descarta
+  //   allow-forms         el compositor de mensajes es un <form onSubmit>
+  //   allow-downloads     exportar la conversación usa un <a download>
+  //
+  // Nota honesta sobre el límite: allow-scripts junto con allow-same-origin
+  // deja de proteger si el contenido enmarcado comparte origen con la página
+  // que lo enmarca, porque desde ahí podría borrar este mismo atributo. Acá no
+  // pasa: el widget se embebe en el sitio de la clientela, que es otro origen.
+  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-downloads");
   frame.style.cssText =
     "position:fixed;bottom:92px;" + side + ":20px;width:380px;max-width:calc(100vw - 40px);" +
     "height:600px;max-height:calc(100vh - 120px);border:0;border-radius:16px;z-index:2147483000;" +
