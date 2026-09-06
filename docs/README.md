@@ -38,6 +38,7 @@ Everything you need to build, brand and operate AI agents for your clients.
 - [Client portal & domains](en/client-portal.md) — Give each client a branded portal on its own custom domain.
 - [Dashboard](en/dashboard.md) — Activity, top agents and token usage by model.
 - [Push notifications](en/push-notifications.md) — The provider seam for mobile push: what ships, what it costs and how to register one.
+- [Invitation e-mail deliverability](en/portal-invitations-email-deliverability.md) — SPF, DKIM and DMARC for `EMAIL_PROVIDER=smtp`, and why an unauthenticated sender lands in spam.
 
 **Self-hosting**
 
@@ -76,6 +77,7 @@ Todo lo que necesitas para construir, marcar y operar agentes de IA para tus cli
 - [Portal del cliente y dominios](es/client-portal.md) — Dale a cada cliente un portal con su marca en su propio dominio.
 - [Panel](es/dashboard.md) — Actividad, agentes destacados y uso de tokens por modelo.
 - [Notificaciones push](es/push-notifications.md) — La costura de proveedores para push móvil: qué trae, qué cuesta y cómo registrar uno.
+- [Entregabilidad de los mails de invitación](es/portal-invitations-email-deliverability.md) — SPF, DKIM y DMARC para `EMAIL_PROVIDER=smtp`, y por qué un remitente sin autenticar termina en spam.
 
 **Autoalojamiento**
 

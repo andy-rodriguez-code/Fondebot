@@ -230,6 +230,9 @@ that client's portal. The portal must be **published** for the domain to serve.
 | `COOKIE_SAMESITE` | Backend | `lax` (default); `none` when the frontend and API are on different sites (requires `COOKIE_SECURE=true`). |
 | `ACCESS_TOKEN_MINUTES` | Backend | Session lifetime. |
 | `WHATSAPP_LOG_LEVEL` | Bridge | Log level; `silent` avoids exposing sensitive data. |
+| `EMAIL_PROVIDER` | Backend | `none` (default) sends no portal invitation e-mails — the link comes back in the API response instead. `smtp` sends it for real; requires the `SMTP_*` variables below. See [Invitation e-mail deliverability](portal-invitations-email-deliverability.md). |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS` | Backend | SMTP server and credentials when `EMAIL_PROVIDER=smtp`. |
+| `INVITATION_TOKEN_MINUTES` | Backend | How long a portal invitation link stays valid (24h default). |
 | `API_PORT`, `WEB_PORT`, `DB_PORT` | Host | Host ports (defaults `8000` / `3000` / `5432`). |
 | `BIND_HOST` | Host | Bind address: `127.0.0.1` (local) or `0.0.0.0` (expose directly). |
 
@@ -387,8 +390,10 @@ Cloud API, and this project is not affiliated with or endorsed by WhatsApp/Meta.
 
 - **Ports already in use.** Override them inline:
   `API_PORT=8001 WEB_PORT=3001 DB_PORT=5433 make up`.
-- **A service is unhealthy.** Check its logs with `make logs SERVICE=api` (or
-  `web`, `whatsapp`, `db`) and `make ps` for status.
+- **A service is unhealthy.** Open **Settings → Site health** in the app
+  (`/settings/health`) for the readiness check and the native error log, then
+  check its logs with `make logs SERVICE=api` (or `web`, `whatsapp`, `db`) and
+  `make ps` for status.
 - **Session does not persist, or login loops behind HTTPS.** Make sure
   `COOKIE_SECURE=true` is set and you are reaching the app over TLS.
 - **Provider keys or the WhatsApp session stopped decrypting.** The

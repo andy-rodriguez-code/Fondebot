@@ -20,6 +20,7 @@ from ..database import new_session
 from .contacts import display_name, phone_from_chat_id, previous_conversation_recap, rename_conversations, resolve_contact
 from .conversation_state import exchanged_only, note_inbound, note_reply
 from .departments import client_departments, entry_department, match_choice, menu_options, route, send_menu
+from .error_log import record_error
 from ..models import Agent, Conversation, Message, now_utc
 from ..security import decrypt_secret
 from .attachments import llm_text, store_attachment
@@ -260,7 +261,7 @@ async def process_inbound(
             return InboundResult(accepted=True, conversation_id=conversation.id, mode="ai")
 
     if get_settings().reply_debounce_seconds > 0:
-        schedule_debounced_reply(conversation.id)
+        schedule_debounced_reply(conversation.id, conversation.agency_id)
         return InboundResult(accepted=True, conversation_id=conversation.id, mode="ai")
 
     await _signal_read_and_typing(channel, conversation, inbound.external_message_id)
@@ -437,7 +438,7 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
 _pending_replies: dict[uuid.UUID, "asyncio.Task[None]"] = {}
 
 
-def schedule_debounced_reply(conversation_id: uuid.UUID) -> None:
+def schedule_debounced_reply(conversation_id: uuid.UUID, agency_id: uuid.UUID | None) -> None:
     """(Re)inicia el temporizador de ventana de silencio de la conversación.
 
     Cada mensaje entrante cancela el temporizador anterior, así que la respuesta
@@ -445,6 +446,11 @@ def schedule_debounced_reply(conversation_id: uuid.UUID) -> None:
     contesta toda la ráfaga con una sola respuesta armada desde el historial
     guardado. Los temporizadores viven en el proceso; una revalidación contra la
     base cuando el temporizador se dispara hace que uno viejo sea inofensivo.
+
+    ``agency_id`` se recibe acá porque el único call site ya tiene la
+    conversación cargada; resolverlo en el callback exigiría una segunda
+    ``new_session()`` justo en el camino de falla, cuando la sesión de la
+    tarea ya se cerró.
     """
     previous = _pending_replies.pop(conversation_id, None)
     if previous is not None and not previous.done():
@@ -455,6 +461,23 @@ def schedule_debounced_reply(conversation_id: uuid.UUID) -> None:
     def _cleanup(finished: "asyncio.Task[None]") -> None:
         if _pending_replies.get(conversation_id) is finished:
             _pending_replies.pop(conversation_id, None)
+        # Un temporizador cancelado es tráfico sano: cada mensaje nuevo del
+        # visitante cancela el anterior (arriba). Además, Task.exception()
+        # LANZA CancelledError sobre una tarea cancelada — sin este return
+        # antes de llamarlo, la falla ocurriría dentro del callback runner de
+        # asyncio en cada mensaje normal, no en la tabla de errores.
+        if finished.cancelled():
+            return
+        exc = finished.exception()
+        if exc is None:
+            return
+        record_error(
+            source="whatsapp.debounced_reply",
+            capture_kind="task_callback",
+            exc=exc,
+            agency_id=agency_id,
+            subject_ref=f"conversation:{conversation_id}",
+        )
 
     task.add_done_callback(_cleanup)
 

@@ -1,6 +1,8 @@
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from .schemas import InvitationOut
 
 
 class DepartmentIn(BaseModel):
@@ -10,8 +12,13 @@ class DepartmentIn(BaseModel):
     is_entry: bool = False
     enabled: bool = True
     position: int = Field(default=0, ge=0, le=999)
+    # Invitación opcional a quien va a atender esta dependencia. Ausente
+    # (default None) deja la creación de la dependencia exactamente como
+    # antes (Spec: Optional Invitation On Department Creation).
+    invite_email: EmailStr | None = None
+    invite_name: str = Field(default="", max_length=160)
 
-    @field_validator("name", "description")
+    @field_validator("name", "description", "invite_name")
     @classmethod
     def _trim(cls, value: str) -> str:
         return value.strip()
@@ -46,3 +53,6 @@ class DepartmentOut(BaseModel):
     # Nombre del agente que contesta, para no obligar a la interfaz a cruzar
     # este listado con el de agentes.
     agent_name: str | None = None
+    # La invitación pendiente de esta dependencia, si tiene una. None cuando
+    # nunca se invitó a nadie, o cuando la última invitación ya fue aceptada.
+    invitation: InvitationOut | None = None

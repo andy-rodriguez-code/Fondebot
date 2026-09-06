@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app import config
-from app.ratelimit import RateLimiter, client_ip, login_rate_limit
+from app.ratelimit import RateLimiter, client_ip, invitation_rate_limit, login_rate_limit
 
 
 def _request(headers=None, host="1.2.3.4"):
@@ -70,4 +70,22 @@ def test_login_rate_limit_returns_429(client, monkeypatch):
         assert "Retry-After" in blocked.headers
     finally:
         login_rate_limit._hits.clear()
+        config.get_settings.cache_clear()
+
+
+def test_invitation_accept_is_rate_limited(client, monkeypatch):
+    """Mirrors the login case: the public accept endpoint is another
+    unauthenticated surface an attacker could hammer with guessed tokens."""
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+    config.get_settings.cache_clear()
+    invitation_rate_limit._hits.clear()
+    try:
+        body = {"token": "un-token-que-nunca-existio-1234567890", "password": "una-contrasena-larga"}
+        for _ in range(10):
+            assert client.post("/api/portal/no-existe/invitations/accept", json=body).status_code == 400
+        blocked = client.post("/api/portal/no-existe/invitations/accept", json=body)
+        assert blocked.status_code == 429
+        assert "Retry-After" in blocked.headers
+    finally:
+        invitation_rate_limit._hits.clear()
         config.get_settings.cache_clear()

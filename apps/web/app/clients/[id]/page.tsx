@@ -9,7 +9,7 @@ import { FormSkeleton, ListRowsSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import type { AgentSummary, Client, ClientDomain, Conversation, Department, PortalUser } from "@/types";
+import type { AgentSummary, Client, ClientDomain, Conversation, Department, InvitationOut, PortalUser } from "@/types";
 
 type Tab = "details" | "agents" | "channels" | "departments" | "inbox" | "portal";
 
@@ -83,6 +83,10 @@ function Departments({ clientId, agents }: { clientId: string; agents: AgentSumm
   const toast = useToast();
   const [rows, setRows] = useState<Department[] | null>(null);
   const [busy, setBusy] = useState(false);
+  // Solo dura hasta el próximo alta: es el único momento en que el token en
+  // claro existe (Spec: Optional Invitation On Department Creation), y
+  // `list_departments` no lo repite en una lectura posterior.
+  const [lastInvitation, setLastInvitation] = useState<InvitationOut | null>(null);
 
   const load = useCallback(async () => {
     setRows(await api<Department[]>(`/clients/${clientId}/departments`));
@@ -93,11 +97,27 @@ function Departments({ clientId, agents }: { clientId: string; agents: AgentSumm
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    const inviteEmail = String(data.get("invite_email") ?? "").trim();
     setBusy(true);
+    setLastInvitation(null);
     try {
-      await api(`/clients/${clientId}/departments`, { method: "POST", body: JSON.stringify({ name: data.get("name"), agent_id: data.get("agent_id"), description: data.get("description"), position: (rows?.length ?? 0) }) });
+      const created = await api<Department>(`/clients/${clientId}/departments`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: data.get("name"),
+          agent_id: data.get("agent_id"),
+          description: data.get("description"),
+          position: (rows?.length ?? 0),
+          invite_email: inviteEmail || undefined,
+        }),
+      });
       form.reset();
-      toast.success(t("clients.detail.departmentAdded"));
+      if (created.invitation) {
+        toast.success(created.invitation.delivery === "manual" ? t("clients.detail.departmentInviteManual") : t("clients.detail.departmentInviteSent"));
+        setLastInvitation(created.invitation);
+      } else {
+        toast.success(t("clients.detail.departmentAdded"));
+      }
       await load();
     } catch (err) { toast.error(messageFrom(err)); } finally { setBusy(false); }
   }
@@ -142,8 +162,14 @@ function Departments({ clientId, agents }: { clientId: string; agents: AgentSumm
         <label>{t("clients.detail.departmentAgent")}<select name="agent_id" required>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
       </div>
       <label>{t("clients.detail.departmentDescription")}<input name="description" maxLength={72} /><span className="field-help">{t("clients.detail.departmentDescriptionHelp")}</span></label>
+      <label>{t("clients.detail.departmentInviteEmail")}<input name="invite_email" type="email" placeholder={t("clients.detail.departmentInviteEmailPlaceholder")} /><span className="field-help">{t("clients.detail.departmentInviteEmailHelp")}</span></label>
       <button className="button secondary align-start" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Building2 size={15} />} {t("clients.detail.departmentAdd")}</button>
     </form>
+
+    {lastInvitation?.accept_url && <div className="field-help">
+      <strong>{t("clients.detail.departmentInviteLinkTitle")}</strong>
+      <div className="url-preview"><code>{lastInvitation.accept_url}</code><button type="button" onClick={() => navigator.clipboard.writeText(lastInvitation.accept_url!)}><Copy size={15} /> {t("clients.detail.copy")}</button></div>
+    </div>}
   </div></section>;
 }
 

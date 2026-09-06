@@ -239,6 +239,9 @@ copia `.env.docker.example` a `.env.docker` y reemplaza cada `CHANGE_*`.
 | `COOKIE_SAMESITE` | Backend | `lax` (por defecto); `none` cuando frontend y API están en sitios distintos (exige `COOKIE_SECURE=true`). |
 | `ACCESS_TOKEN_MINUTES` | Backend | Duración de la sesión. |
 | `WHATSAPP_LOG_LEVEL` | Puente | Nivel de log; `silent` evita exponer datos sensibles. |
+| `EMAIL_PROVIDER` | Backend | `none` (por defecto) no manda invitaciones al portal por mail, el link vuelve en la respuesta de la API. `smtp` las manda de verdad; requiere las variables `SMTP_*` de abajo. Ver [Entregabilidad de los mails de invitación](portal-invitations-email-deliverability.md). |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS` | Backend | Servidor y credenciales SMTP cuando `EMAIL_PROVIDER=smtp`. |
+| `INVITATION_TOKEN_MINUTES` | Backend | Minutos de vigencia de un link de invitación al portal (24 h por defecto). |
 | `API_PORT`, `WEB_PORT`, `DB_PORT` | Host | Puertos del host (por defecto `8000` / `3000` / `5432`). |
 | `BIND_HOST` | Host | Dirección de escucha: `127.0.0.1` (local) o `0.0.0.0` (exposición directa). |
 
@@ -406,7 +409,9 @@ WhatsApp ni por Meta.
 
 - **Puertos ocupados.** Sobrescríbelos en la misma línea:
   `API_PORT=8001 WEB_PORT=3001 DB_PORT=5433 make up`.
-- **Un servicio no está sano.** Revisa sus logs con `make logs SERVICE=api` (o
+- **Un servicio no está sano.** Abre **Configuración → Salud del sitio** en la
+  app (`/settings/health`) para ver el chequeo de disponibilidad y el registro
+  nativo de errores; después revisa sus logs con `make logs SERVICE=api` (o
   `web`, `whatsapp`, `db`) y `make ps` para ver el estado.
 - **La sesión no persiste, o el login entra en bucle detrás de HTTPS.** Asegúrate
   de tener `COOKIE_SECURE=true` y de estar llegando a la app por TLS.

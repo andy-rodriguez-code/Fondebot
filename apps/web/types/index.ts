@@ -52,6 +52,32 @@ export type Department = {
   is_entry: boolean;
   enabled: boolean;
   position: number;
+  // Solo viene poblada en la respuesta de creación/reenvío (y, más adelante,
+  // en la lectura de la lista): null cuando nunca se invitó a nadie a esta
+  // dependencia, o cuando la última invitación ya fue aceptada.
+  invitation?: InvitationOut | null;
+};
+
+// Espejo de InvitationOut en apps/api/app/schemas.py.
+export type InvitationOut = {
+  id: string;
+  email: string;
+  expires_at: string;
+  delivery: "sent" | "manual" | "failed";
+  // Solo viaja cuando delivery === "manual": con e-mail activo queda
+  // explícitamente en null para que el frontend tenga una sola rama.
+  accept_url: string | null;
+};
+
+export type PortalInvitationAccept = { token: string; password: string };
+
+export type PortalSession = {
+  client_id: string;
+  client_name: string;
+  portal_slug: string;
+  agency_name: string;
+  user_id: string | null;
+  user_name: string | null;
 };
 
 export type ClientDomain = {
@@ -255,6 +281,28 @@ export type Contact = {
   conversation_count: number;
   open_count: number;
   last_activity_at: string | null;
+};
+
+// Espejo de ErrorEventOut en apps/api/app/schemas.py.
+export type ErrorEvent = {
+  id: string;
+  occurred_at: string;
+  source: string;
+  capture_kind: string;
+  exception_type: string;
+  message: string;
+  traceback: string | null;
+  request_method: string | null;
+  request_path: string | null;
+  subject_ref: string | null;
+  // true cuando la fila no tiene agency_id (no derivable): visible para
+  // cualquier persona autenticada, no solo para la agencia dueña.
+  is_global: boolean;
+};
+
+export type ReadinessCheck = {
+  status: "ok" | "degraded";
+  checks: { database: "ok" | "error" };
 };
 
 export type PortalPublic = {
