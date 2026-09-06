@@ -11,12 +11,34 @@ from cryptography.fernet import Fernet
 from .config import get_settings
 
 
+# bcrypt no acepta entradas más largas que esto: desde la versión 4 lanza
+# ValueError en vez de truncar en silencio. El límite es en BYTES, no en
+# caracteres, así que una tilde gasta dos y un emoji cuatro. Lo importa
+# `schemas.py` para rechazar antes de llegar acá; vive de este lado porque es
+# una propiedad de bcrypt, no del contrato de la API.
+BCRYPT_MAX_BYTES = 72
+
+
 def hash_password(password: str) -> str:
+    """Hashea una contraseña que ya pasó por el tipo ``Password`` de schemas.py.
+
+    Lanza si la entrada supera ``BCRYPT_MAX_BYTES``. Quien llame desde fuera de
+    un schema tiene que validar primero.
+    """
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+    encoded = password.encode()
+    if len(encoded) > BCRYPT_MAX_BYTES:
+        # No hace falta preguntarle a bcrypt: ningún hash guardado pudo salir de
+        # una entrada más larga que el límite, así que esto no coincide con
+        # nada. Devolver False es la respuesta correcta, y además evita el
+        # ValueError que `checkpw` lanzaría acá. Ese error terminaba en un 500 en
+        # el login, que es público y sin autenticar: cualquiera podía pegarle
+        # con una contraseña larga y sacar un error del servidor.
+        return False
+    return bcrypt.checkpw(encoded, password_hash.encode())
 
 
 def create_access_token(user_id: str) -> str:

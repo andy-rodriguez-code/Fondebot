@@ -1,8 +1,35 @@
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+
+from .security import BCRYPT_MAX_BYTES
+
+
+def _fits_bcrypt(value: str) -> str:
+    """bcrypt rechaza cualquier entrada de más de 72 bytes con ValueError.
+
+    Sin este chequeo el error sube sin manejar y sale como 500. Pasaba en el
+    registro, en el alta y el cambio de contraseña de una persona del portal, y
+    al aceptar una invitación —donde ``hash_password`` corre como primera línea
+    del handler, antes de mirar el token, en un endpoint público.
+
+    Se mide en bytes y no en caracteres porque una tilde ocupa dos: un
+    ``max_length`` de Pydantic cuenta caracteres y por eso no alcanza.
+
+    No filtra nada: el rechazo depende solo del largo de lo que se escribió,
+    que quien lo escribió ya conoce.
+    """
+    if len(value.encode()) > BCRYPT_MAX_BYTES:
+        raise ValueError(f"The password must be at most {BCRYPT_MAX_BYTES} bytes long")
+    return value
+
+
+# El tipo de toda contraseña que después se hashea. Existe para que la regla
+# viva en un solo lugar: cada `str` suelto que termine en `hash_password` es un
+# 500 esperando a alguien que use un gestor de contraseñas.
+Password = Annotated[str, Field(min_length=8, max_length=128), AfterValidator(_fits_bcrypt)]
 
 
 class ORMModel(BaseModel):
@@ -13,7 +40,7 @@ class RegisterRequest(BaseModel):
     agency_name: str = Field(min_length=2, max_length=180)
     name: str = Field(min_length=2, max_length=160)
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: Password
 
 
 class LoginRequest(BaseModel):
@@ -98,7 +125,7 @@ class PortalUserCreate(BaseModel):
     """A person at the client's business who can answer from the portal or app."""
 
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: Password
     name: str = Field(default="", max_length=160)
     # La dependencia a la que pertenece. None significa que ve todo el cliente:
     # es lo que corresponde a quien supervisa.
@@ -107,7 +134,7 @@ class PortalUserCreate(BaseModel):
 
 class PortalUserUpdate(BaseModel):
     email: EmailStr | None = None
-    password: str | None = Field(default=None, min_length=8, max_length=128)
+    password: Password | None = None
     name: str | None = Field(default=None, max_length=160)
     is_active: bool | None = None
     # Mandar null saca a la persona de su dependencia y la deja viendo todo.
@@ -494,24 +521,7 @@ class PortalLoginRequest(BaseModel):
 
 class PortalInvitationAccept(BaseModel):
     token: str = Field(min_length=1)
-    password: str = Field(min_length=8, max_length=128)
-
-    @field_validator("password")
-    @classmethod
-    def _fits_bcrypt(cls, value: str) -> str:
-        """bcrypt rechaza cualquier entrada de más de 72 bytes con ValueError.
-
-        Sin este chequeo, ``hash_password`` —que corre como primera línea del
-        handler, antes de mirar el token— convierte una contraseña larga en un
-        500 en un endpoint público y sin autenticar. Se valida en bytes y no en
-        caracteres porque una tilde ocupa dos.
-
-        No filtra nada: el rechazo depende solo del largo de la contraseña, que
-        quien la escribió ya conoce, nunca de si el token existe.
-        """
-        if len(value.encode()) > 72:
-            raise ValueError("The password must be at most 72 bytes long")
-        return value
+    password: Password
 
 
 class PortalPublicOut(BaseModel):
