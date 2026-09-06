@@ -38,7 +38,7 @@ idioma de la persona que atiende el negocio, no una cadena de interfaz.
 
 ## Repo hygiene
 
-Enable the pre-commit guard once per clone: `git config core.hooksPath .githooks`. It blocks committing local-only files (`work/`, `internal/`, `*.local.md`) and any staged content matching terms in `work/forbidden-words.txt` (gitignored) or a commit-blocking marker (spelled out in `.githooks/pre-commit`; this file cannot quote it without tripping the guard it describes). Keep internal notes/roadmap in `work/` (gitignored) — never in the repo.
+Enable the pre-commit guard once per clone: `git config core.hooksPath .githooks` — it fails fast, before a bad commit exists. CI runs the same hook on every pull request (the `guard` job), so forgetting the local setup delays the answer rather than removing it. CI cannot check the private word list, since that list must never reach this repository; it checks the built-in markers and the local-only paths. It blocks committing local-only files (`work/`, `internal/`, `*.local.md`) and any staged content matching terms in `work/forbidden-words.txt` (gitignored) or a commit-blocking marker (spelled out in `.githooks/pre-commit`; this file cannot quote it without tripping the guard it describes). Keep internal notes/roadmap in `work/` (gitignored) — never in the repo.
 
 ## Commands
 
