@@ -348,5 +348,6 @@ def test_a_long_traceback_keeps_its_innermost_frames(monkeypatch):
         row = db.query(ErrorEvent).one()
         assert len(row.traceback) == error_log.TRACEBACK_MAX_LENGTH
         # Truncado por la cola: lo que sobrevive es el final, que es donde
-        # está la respuesta a "dónde rompió".
-        assert row.traceback.endswith(padding[-50:])
+        # está la respuesta a "dónde rompió". Se busca la subcadena y no un
+        # endswith: format_exception cierra con un salto de línea.
+        assert padding[-50:] in row.traceback
