@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Cookie, Depends, Header, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import and_, case, func, or_, select, true
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..config import get_settings
@@ -293,6 +294,23 @@ def accept_invitation(slug: str, payload: PortalInvitationAccept, response: Resp
         or invitation.accepted_at is not None
         or invitation.expires_at < now_utc()
         or not verify_invitation_token(payload.token, invitation.token_hash)
+        # La invitación era válida al emitirse, pero desde entonces —hasta 24 h—
+        # alguien pudo crear a mano una persona del portal con esta misma
+        # dirección, o renombrar una existente hacia ella: ni
+        # ``create_portal_user`` ni ``update_portal_user`` miran invitaciones
+        # pendientes. Sin este chequeo el INSERT choca contra
+        # ``uq_portal_users_client_email`` y sale un 500 en una ruta pública.
+        # El link efectivamente está muerto, así que responde como cualquier
+        # otro link muerto y no delata nada.
+        or (
+            invitation is not None
+            and db.scalar(
+                select(PortalUser.id).where(
+                    PortalUser.client_id == invitation.client_id, PortalUser.email == invitation.email
+                )
+            )
+            is not None
+        )
     ):
         raise _invitation_invalid()
 
@@ -306,7 +324,15 @@ def accept_invitation(slug: str, payload: PortalInvitationAccept, response: Resp
     )
     invitation.accepted_at = now_utc()
     db.add(portal_user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # El chequeo de arriba deja una ventana: dos aceptaciones simultáneas
+        # del mismo link lo pasan las dos antes de que ninguna confirme. La
+        # base es la única que puede arbitrar eso, y la perdedora tiene que
+        # salir por la misma puerta que cualquier link muerto, no por un 500.
+        db.rollback()
+        raise _invitation_invalid() from None
     db.refresh(portal_user)
 
     settings = get_settings()

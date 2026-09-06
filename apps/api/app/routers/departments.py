@@ -85,15 +85,23 @@ def _out(department: Department, invitation: PortalInvitation | None = None) -> 
     return data
 
 
-def _assert_no_active_portal_user(db: Session, client: Client, email: str) -> None:
-    """Espejo del chequeo de ``create_portal_user`` (Spec: Duplicate Portal-User
-    Handling). Solo bloquea contra un miembro ACTIVO del MISMO cliente: la
-    misma dirección en otro cliente está permitida, porque el índice único de
-    ``portal_users`` es por cliente."""
+def _assert_no_portal_user(db: Session, client: Client, email: str) -> None:
+    """Espejo exacto del chequeo de ``create_portal_user`` (Spec: Duplicate
+    Portal-User Handling): cualquier fila del MISMO cliente, activa o no.
+
+    Filtrar por ``is_active`` acá parecía más permisivo y era un 500. El índice
+    ``uq_portal_users_client_email`` no distingue estado, así que suspender a
+    una persona y volver a invitar su dirección dejaba pasar el guard, emitía
+    la invitación, y recién explotaba al aceptar: el INSERT chocaba con el
+    índice dentro de un endpoint público y sin autenticar. Una persona
+    suspendida ya existe; lo que corresponde es reactivarla, no invitarla de
+    nuevo.
+
+    La misma dirección en OTRO cliente sí está permitida: el índice es por
+    cliente.
+    """
     existing = db.scalar(
-        select(PortalUser.id).where(
-            PortalUser.client_id == client.id, PortalUser.email == email, PortalUser.is_active.is_(True)
-        )
+        select(PortalUser.id).where(PortalUser.client_id == client.id, PortalUser.email == email)
     )
     if existing:
         raise HTTPException(status_code=409, detail="That e-mail is already on this portal")
@@ -215,7 +223,7 @@ def create_department(
     _validate_agent(db, client, payload.agent_id)
     invite_email = payload.invite_email.lower() if payload.invite_email else None
     if invite_email:
-        _assert_no_active_portal_user(db, client, invite_email)
+        _assert_no_portal_user(db, client, invite_email)
     is_first = not db.scalar(select(Department.id).where(Department.client_id == client.id))
     department = Department(
         client_id=client.id,
@@ -278,6 +286,11 @@ def resend_invitation(
     )
     if not pending:
         raise HTTPException(status_code=404, detail="This department has no pending invitation to resend")
+    # Entre la invitación original y este reenvío, esa dirección pudo haberse
+    # vuelto miembro del portal por otro camino. Refrescar el token entonces
+    # entrega un link que solo puede terminar en el choque contra
+    # uq_portal_users_client_email al aceptarlo.
+    _assert_no_portal_user(db, client, pending.email)
     invitation, raw_token = issue_invitation(
         db, client=client, email=pending.email, department_id=department.id,
         name=pending.name, invited_by=user.id,

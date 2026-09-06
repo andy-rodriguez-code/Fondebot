@@ -16,8 +16,9 @@ from urllib.parse import parse_qs, urlparse
 from fastapi.testclient import TestClient
 
 import app.routers.portal as portal_router
+from app.config import get_settings
 from app.database import SessionLocal
-from app.models import PortalInvitation, PortalUser
+from app.models import Client, Conversation, PortalInvitation, PortalUser
 from app.routers.portal import INVITATION_INVALID_DETAIL
 from app.security import generate_invitation_token, hash_invitation_token, verify_invitation_token
 
@@ -505,3 +506,193 @@ def test_deleting_the_department_removes_its_pending_invitation(authenticated_cl
             .count()
             == 0
         )
+
+
+# --- Regressions found by verification ----------------------------------------
+
+
+def test_inviting_a_suspended_portal_user_is_refused_not_deferred_to_a_500(authenticated_client: TestClient):
+    """The guard has to mirror the constraint, not a friendlier subset of it.
+
+    `uq_portal_users_client_email` does not care whether a row is active, so a
+    guard that only looked at active members let the invitation through and
+    moved the failure to the accept endpoint — where the INSERT hit the index
+    and turned into a 500, on a public unauthenticated route. A suspended
+    person already exists; the answer is to reactivate them.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    created = client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "suspendida@example.com", "password": PASSWORD, "name": "Suspendida"},
+    )
+    assert created.status_code == 201, created.text
+    suspended = client.patch(
+        f"/api/clients/{customer['id']}/portal-users/{created.json()['id']}", json={"is_active": False}
+    )
+    assert suspended.status_code == 200, suspended.text
+
+    refused = client.post(
+        f"/api/clients/{customer['id']}/departments",
+        json={"name": "Soporte", "agent_id": agent["id"], "invite_email": "suspendida@example.com"},
+    )
+    assert refused.status_code == 409
+    with SessionLocal() as db:
+        assert db.query(PortalInvitation).count() == 0
+
+
+def test_resending_after_the_address_became_a_member_is_refused(authenticated_client: TestClient):
+    """Refreshing a token that can only ever collide is not a resend."""
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="doble@example.com")
+
+    client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "doble@example.com", "password": PASSWORD, "name": "Doble"},
+    )
+
+    resent = client.post(f"/api/clients/{customer['id']}/departments/{department['id']}/invitations")
+    assert resent.status_code == 409, resent.text
+
+
+def test_an_admin_cannot_invite_into_another_agencys_client(client: TestClient, monkeypatch):
+    """Tenant isolation, exercised rather than assumed.
+
+    The existing wrong-slug test uses two clients of the SAME agency, so it
+    reads like this one without being it.
+    """
+    monkeypatch.setattr(get_settings(), "allow_multi_agency", True)
+    client.post(
+        "/api/auth/register",
+        json={"agency_name": "Agencia A", "name": "Ana", "email": "ana@a.com", "password": "una-clave-larga"},
+    )
+    customer = _make_client(client, "Cliente de A")
+    agent = _make_agent(client, customer["id"])
+
+    # Registering switches the session to the second agency.
+    client.post(
+        "/api/auth/register",
+        json={"agency_name": "Agencia B", "name": "Bea", "email": "bea@b.com", "password": "otra-clave-larga"},
+    )
+    intruder = client.post(
+        f"/api/clients/{customer['id']}/departments",
+        json={"name": "Ajena", "agent_id": agent["id"], "invite_email": "objetivo@example.com"},
+    )
+
+    # With the body: a mistyped URL also returns 404, and would read as a pass.
+    assert intruder.status_code == 404, intruder.text
+    assert intruder.json()["detail"] == "Client not found"
+    with SessionLocal() as db:
+        assert db.query(PortalInvitation).count() == 0
+
+
+def test_the_password_chosen_when_accepting_is_the_one_that_signs_in(authenticated_client: TestClient):
+    """Without this, storing a constant hash would leave the suite green.
+
+    Every other accept test checks columns, the cookie and /me — all of which
+    hold whether or not the stored hash corresponds to what was typed.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "primera@example.com", "password": PASSWORD, "name": "Primera"},
+    )
+    assert client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True}).status_code == 200
+
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="nueva@example.com")
+    chosen = "la-que-yo-elegi-1234"
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+    assert _accept(client, customer["portal_slug"], token, password=chosen).status_code == 200
+
+    fresh = TestClient(client.app)
+    slug = customer["portal_slug"]
+    assert fresh.post(f"/api/portal/{slug}/login", json={"email": "nueva@example.com", "password": chosen}).status_code == 200
+    wrong = fresh.post(f"/api/portal/{slug}/login", json={"email": "nueva@example.com", "password": PASSWORD})
+    assert wrong.status_code == 401
+
+
+def test_a_user_created_by_accepting_only_sees_their_own_department(authenticated_client: TestClient):
+    """The spec scopes the inbox for a user *created via acceptance*.
+
+    Asserting the department_id column, which the other accept tests do, says
+    nothing about the boundary: `_visible` is what enforces it, and until now
+    it was only ever exercised for users made through create_portal_user.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "jefa@example.com", "password": PASSWORD, "name": "Jefa"},
+    )
+    assert client.patch(f"/api/clients/{customer['id']}/portal", json={"portal_enabled": True}).status_code == 200
+
+    mine = _department_with_invite(client, customer["id"], agent["id"], invite_email="mia@example.com")
+    other = client.post(
+        f"/api/clients/{customer['id']}/departments",
+        json={"name": "Contabilidad", "agent_id": agent["id"]},
+    )
+    assert other.status_code == 201, other.text
+
+    chosen = "mi-propia-clave-9876"
+    token = _token_from_accept_url(mine["invitation"]["accept_url"])
+    assert _accept(client, customer["portal_slug"], token, password=chosen).status_code == 200
+
+    # One conversation in each department, inserted directly: what is under
+    # test is the read boundary, not how a conversation comes into being.
+    with SessionLocal() as db:
+        client_row = db.get(Client, uuid.UUID(customer["id"]))
+        for department_id, title in ((mine["id"], "Caso mío"), (other.json()["id"], "Caso ajeno")):
+            db.add(
+                Conversation(
+                    agency_id=client_row.agency_id,
+                    client_id=client_row.id,
+                    agent_id=uuid.UUID(agent["id"]),
+                    department_id=uuid.UUID(department_id),
+                    title=title,
+                    channel="whatsapp_cloud",
+                )
+            )
+        db.commit()
+
+    portal = TestClient(client.app)
+    slug = customer["portal_slug"]
+    assert portal.post(f"/api/portal/{slug}/login", json={"email": "mia@example.com", "password": chosen}).status_code == 200
+    titles = [row["title"] for row in portal.get(f"/api/portal/{slug}/conversations").json()]
+    assert titles == ["Caso mío"]
+
+
+def test_accepting_after_the_address_became_a_member_is_a_dead_link_not_a_500(authenticated_client: TestClient):
+    """The collision happens where the invitation is redeemed, not issued.
+
+    Widening the guard on department creation and on resend closed the two
+    doors where an invitation is *issued*. This is the third: between issuing
+    and accepting there are up to 24 hours, and neither create_portal_user nor
+    update_portal_user looks at pending invitations. An admin who invites,
+    grows impatient and creates the account by hand leaves a live link whose
+    INSERT hits uq_portal_users_client_email — a 500 on a public route.
+    """
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+    department = _department_with_invite(client, customer["id"], agent["id"], invite_email="impaciente@example.com")
+    token = _token_from_accept_url(department["invitation"]["accept_url"])
+
+    created = client.post(
+        f"/api/clients/{customer['id']}/portal-users",
+        json={"email": "impaciente@example.com", "password": PASSWORD, "name": "Impaciente"},
+    )
+    assert created.status_code == 201, created.text
+
+    dead = _accept(client, customer["portal_slug"], token)
+    assert dead.status_code == 400, dead.text
+    # The same body as any other dead link: a valid token whose address was
+    # taken must not be distinguishable from one that never existed.
+    assert dead.json() == {"detail": INVITATION_INVALID_DETAIL}
+    with SessionLocal() as db:
+        assert db.query(PortalUser).filter(PortalUser.email == "impaciente@example.com").count() == 1
