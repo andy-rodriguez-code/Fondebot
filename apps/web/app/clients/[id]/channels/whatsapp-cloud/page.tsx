@@ -7,6 +7,7 @@ import { ArrowLeft, BadgeCheck, Bot, CheckCircle2, CircleAlert, ClipboardCopy, K
 import { Alert } from "@/components/ui";
 import { api, ApiError, messageFrom } from "@/lib/api";
 import { useT, type I18nKey } from "@/lib/i18n";
+import { useConfirm } from "@/components/confirm-dialog";
 import type { Client, WhatsAppCloudChannel } from "@/types";
 
 const stateKeys: Record<WhatsAppCloudChannel["status"], { label: I18nKey; copy: I18nKey }> = {
@@ -31,6 +32,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
 
 export default function WhatsAppCloudChannelPage() {
   const t = useT();
+  const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const [client, setClient] = useState<Client | null>(null);
   const [channel, setChannel] = useState<WhatsAppCloudChannel | null>(null);
@@ -86,7 +88,12 @@ export default function WhatsAppCloudChannelPage() {
   }
 
   async function disconnect() {
-    if (!confirm(t("clients.whatsappCloud.confirmDisconnect"))) return;
+    const ok = await confirm({
+      title: t("clients.whatsappCloud.confirmDisconnect"),
+      confirmLabel: t("clients.whatsappCloud.disconnect"),
+      tone: "danger",
+    });
+    if (!ok) return;
     setBusy(true); setError("");
     try { setChannel(await api<WhatsAppCloudChannel>(`/whatsapp-cloud/channels/${id}/disconnect`, { method: "POST" })); }
     catch (err) { setError(messageFrom(err)); } finally { setBusy(false); }

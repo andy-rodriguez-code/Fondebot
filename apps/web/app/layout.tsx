@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Manrope } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
+import { ConfirmProvider } from "@/components/confirm-dialog";
 import { ToastProvider } from "@/components/toast";
 import { LanguageProvider } from "@/lib/i18n";
 
@@ -23,7 +24,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className={`${inter.variable} ${manrope.variable}`}>
         <LanguageProvider>
           <ToastProvider>
-            <AppShell>{children}</AppShell>
+            <ConfirmProvider>
+              <AppShell>{children}</AppShell>
+            </ConfirmProvider>
           </ToastProvider>
         </LanguageProvider>
       </body>

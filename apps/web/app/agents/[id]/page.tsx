@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, AudioLines, Bot, CheckCircle2, Code, Copy, ExternalLink, FileText, ImageIcon, LoaderCircle, MessageSquareText, Plus, Power, PowerOff, Save, Settings2, Sparkles, Trash2, UploadCloud, Wrench, XCircle } from "lucide-react";
 import { api, messageFrom } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Alert } from "@/components/ui";
 import { FormSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
@@ -20,6 +21,7 @@ type Tab = "details" | "knowledge" | "tools" | "widget" | "playground";
 
 export default function AgentDetailPage() {
   const t = useT();
+  const confirm = useConfirm();
   const toast = useToast();
   const { id } = useParams<{ id: string }>();
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -111,7 +113,13 @@ export default function AgentDetailPage() {
   }
 
   async function removeDocument(doc: KnowledgeDocument) {
-    if (!confirm(t("agents.detail.confirmDelete", { filename: doc.filename }))) return;
+    const ok = await confirm({
+      title: t("agents.detail.confirmDelete", { filename: doc.filename }),
+      consequence: t("common.irreversible"),
+      confirmLabel: t("common.delete"),
+      tone: "danger",
+    });
+    if (!ok) return;
     await api(`/agents/${id}/documents/${doc.id}`, { method: "DELETE" });
     setDocuments((items) => items.filter((item) => item.id !== doc.id));
   }
