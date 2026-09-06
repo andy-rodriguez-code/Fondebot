@@ -101,3 +101,22 @@ Two things open when you turn it on, and the second one is easy to miss:
   minute per IP — is what puts a price on probing.
 
 Neither applies at the default value.
+
+## Attachment retention
+
+`message_attachments` is the only table that grows without a ceiling as the
+product is used: every image and every voice note a contact sends is stored in
+full. Logos are one per agency, and PDFs are uploaded by an administrator on
+purpose; this is neither.
+
+| Variable | What it does | Default |
+| --- | --- | --- |
+| `ATTACHMENT_RETENTION_DAYS` | How many days image and voice-note binaries are kept. `0` deletes nothing | `0` |
+
+**It ships off on purpose.** Upgrading the application must never start deleting
+data for someone who did not ask for it. Turning it on needs no restart: the
+sweep runs anyway and picks the new value up on its next pass, every six hours.
+
+The file goes, the conversation stays: the message keeps its text and its
+transcription, so the case still reads end to end. Only the original file is
+missing afterwards.

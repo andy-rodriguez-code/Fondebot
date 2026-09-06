@@ -129,6 +129,11 @@ class Settings(BaseSettings):
     # Ninguno de los dos límites solo alcanza: una ráfaga cabe entera dentro
     # de la ventana de tiempo, y una instancia tranquila nunca llega al tope
     # de filas. 0 desactiva ese límite en particular.
+    # Cuantos dias se guardan los binarios de imagenes y notas de voz. Es la
+    # unica tabla que crece sin techo con el uso. En 0 no se borra nada, y ese
+    # es el valor por defecto a proposito: actualizar no puede empezar a borrar
+    # datos de alguien sin que lo haya pedido.
+    attachment_retention_days: int = 0
     error_log_retention_days: int = 30
     error_log_max_rows: int = 5000
 
