@@ -20,6 +20,7 @@ from .routers import (
     dashboard,
     departments,
     domains,
+    health,
     mobile,
     portal,
     providers,
@@ -165,6 +166,7 @@ app.include_router(providers.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(health.router, prefix="/api")
 app.include_router(mobile.router, prefix="/api")
 app.include_router(portal.router, prefix="/api")
 app.include_router(whatsapp.router, prefix="/api")

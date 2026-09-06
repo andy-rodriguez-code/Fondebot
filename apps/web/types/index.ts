@@ -283,6 +283,28 @@ export type Contact = {
   last_activity_at: string | null;
 };
 
+// Espejo de ErrorEventOut en apps/api/app/schemas.py.
+export type ErrorEvent = {
+  id: string;
+  occurred_at: string;
+  source: string;
+  capture_kind: string;
+  exception_type: string;
+  message: string;
+  traceback: string | null;
+  request_method: string | null;
+  request_path: string | null;
+  subject_ref: string | null;
+  // true cuando la fila no tiene agency_id (no derivable): visible para
+  // cualquier persona autenticada, no solo para la agencia dueña.
+  is_global: boolean;
+};
+
+export type ReadinessCheck = {
+  status: "ok" | "degraded";
+  checks: { database: "ok" | "error" };
+};
+
 export type PortalPublic = {
   client_name: string;
   portal_title: string;
