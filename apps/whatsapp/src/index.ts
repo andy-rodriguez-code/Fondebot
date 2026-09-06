@@ -34,7 +34,20 @@ async function body(request: IncomingMessage, maxBytes = 100_000): Promise<Recor
 // Outbound media arrives base64-encoded; the backend caps files at 20 MB.
 const MAX_SEND_BYTES = 30_000_000;
 
+/** El identificador del pedido que manda el backend, para poder atar las
+ * lineas de los dos procesos.
+ *
+ * Se valida la forma antes de escribirlo: un valor que llega por cabecera y
+ * termina en un log deja que quien llama meta saltos de linea y fabrique
+ * entradas enteras que nunca ocurrieron. El backend valida igual del otro
+ * lado; esto no depende de eso. */
+function requestId(header: string | string[] | undefined): string {
+  const value = Array.isArray(header) ? header[0] : header;
+  return value && /^[A-Za-z0-9._-]{1,64}$/.test(value) ? value : "-";
+}
+
 const server = createServer(async (request, response) => {
+  const traceId = requestId(request.headers["x-request-id"]);
   try {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
     if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { status: "ok" });
@@ -74,7 +87,7 @@ const server = createServer(async (request, response) => {
     // Baileys o de la base puede traer rutas, estado de sesión o el motivo de
     // una conexión fallida. Quien llama es el backend, que no necesita nada de
     // eso para reintentar.
-    console.error("[WhatsApp] Operation error:", (error as Error).message);
+    console.error(`[WhatsApp] [${traceId}] Operation error:`, (error as Error).message);
     return json(response, 500, { error: "Internal error" });
   }
 });

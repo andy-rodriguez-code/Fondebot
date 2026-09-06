@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import Conversation, WhatsAppCloudChannel
+from ..logging_setup import current_request_id
 from ..security import decrypt_secret
 from .audio import audio_duration_seconds, to_whatsapp_voice
 from .whatsapp_cloud import send_media, send_text, upload_media
@@ -20,7 +21,13 @@ async def bridge_command(method: str, path: str, payload: dict | None = None, ti
             response = await client.request(
                 method,
                 f"{settings.whatsapp_bridge_url.rstrip('/')}{path}",
-                headers={"X-Bridge-Token": settings.whatsapp_bridge_token},
+                # El identificador del pedido cruza al puente: sin esto, la
+                # traza se corta justo en el salto entre los dos procesos, que
+                # es donde más falta hace para entender qué pasó.
+                headers={
+                    "X-Bridge-Token": settings.whatsapp_bridge_token,
+                    "X-Request-Id": current_request_id() or "-",
+                },
                 json=payload,
             )
     except httpx.RequestError as exc:

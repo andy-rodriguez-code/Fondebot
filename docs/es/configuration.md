@@ -122,3 +122,24 @@ horas.
 Se borra el archivo, no la conversación: el mensaje se queda con su texto y su
 transcripción, así que el caso se sigue leyendo entero. Lo único que falta
 después es el archivo original.
+
+## Logs
+
+Cada pedido recibe un identificador que aparece en todas las líneas que ese
+pedido produce, incluidas las de acceso de uvicorn, y vuelve en la cabecera
+`X-Request-Id` de la respuesta. Esa cabecera es el punto: quien reporta un
+problema puede citarla, y con eso se llega directo a sus líneas en vez de leer
+todo lo que pasó a esa hora.
+
+| Variable | Qué hace | Por defecto |
+| --- | --- | --- |
+| `LOG_FORMAT` | `text` es legible en `docker compose logs`; `json` es para quien los manda a algún lado | `text` |
+| `LOG_LEVEL` | Nivel mínimo | `INFO` |
+
+Si el pedido llega con un `X-Request-Id` propio, se respeta —así una traza que
+empezó en otro servicio no se corta acá— pero solo si tiene una forma
+inofensiva. Un valor que llega por cabecera y termina escrito en un log deja
+que quien llama meta saltos de línea y fabrique entradas que nunca ocurrieron.
+
+El identificador también viaja al puente de WhatsApp, así las líneas de los dos
+procesos se pueden atar.
