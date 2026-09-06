@@ -1,7 +1,23 @@
 name: openlivery
 
+# Se aplica a todos los servicios.
+#
+# `no-new-privileges` impide que un proceso de adentro gane privilegios que no
+# tenía al arrancar, por ejemplo ejecutando un binario setuid. Ninguno de estos
+# contenedores lo necesita, y postgres tampoco: su entrypoint arranca como root
+# y BAJA a su propio usuario, y bajar privilegios no es ganarlos.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+
 services:
   db:
+    <<: *hardening
+    # Un contenedor desbocado no puede llevarse puesta la máquina entera.
+    # Los valores son un techo, no una reserva, y se suben desde .env.docker
+    # sin editar este archivo: ver docs/es/configuration.md.
+    mem_limit: ${DB_MEMORY_LIMIT:-1g}
+    cpus: ${DB_CPU_LIMIT:-1.0}
     image: postgres:17.6-alpine
     container_name: openlivery_db
     env_file:
@@ -20,6 +36,12 @@ services:
     restart: unless-stopped
 
   api:
+    <<: *hardening
+    # Un contenedor desbocado no puede llevarse puesta la máquina entera.
+    # Los valores son un techo, no una reserva, y se suben desde .env.docker
+    # sin editar este archivo: ver docs/es/configuration.md.
+    mem_limit: ${API_MEMORY_LIMIT:-1g}
+    cpus: ${API_CPU_LIMIT:-2.0}
     build:
       context: ./apps/api
       dockerfile: Dockerfile
@@ -49,6 +71,12 @@ services:
     restart: unless-stopped
 
   web:
+    <<: *hardening
+    # Un contenedor desbocado no puede llevarse puesta la máquina entera.
+    # Los valores son un techo, no una reserva, y se suben desde .env.docker
+    # sin editar este archivo: ver docs/es/configuration.md.
+    mem_limit: ${WEB_MEMORY_LIMIT:-512m}
+    cpus: ${WEB_CPU_LIMIT:-1.0}
     build:
       context: ./apps/web
       dockerfile: Dockerfile
@@ -71,6 +99,12 @@ services:
     restart: unless-stopped
 
   whatsapp:
+    <<: *hardening
+    # Un contenedor desbocado no puede llevarse puesta la máquina entera.
+    # Los valores son un techo, no una reserva, y se suben desde .env.docker
+    # sin editar este archivo: ver docs/es/configuration.md.
+    mem_limit: ${WHATSAPP_MEMORY_LIMIT:-512m}
+    cpus: ${WHATSAPP_CPU_LIMIT:-1.0}
     build:
       context: ./apps/whatsapp
       dockerfile: Dockerfile
@@ -99,12 +133,22 @@ services:
   # and everything else to the frontend. Put your own reverse proxy in front of
   # this port for TLS in production.
   proxy:
-    image: caddy:2-alpine
+    <<: *hardening
+    # Un contenedor desbocado no puede llevarse puesta la máquina entera.
+    # Los valores son un techo, no una reserva, y se suben desde .env.docker
+    # sin editar este archivo: ver docs/es/configuration.md.
+    mem_limit: ${PROXY_MEMORY_LIMIT:-128m}
+    cpus: ${PROXY_CPU_LIMIT:-0.5}
+    build:
+      context: ./docker/proxy
+      dockerfile: Dockerfile
+    image: ${OPENLIVERY_IMAGE_PREFIX:-ghcr.io/sarrazola/openlivery}-proxy:${OPENLIVERY_VERSION:-latest}
     container_name: openlivery_proxy
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${WEB_PORT:-3000}:80"
+      # 8080 adentro porque el gateway corre sin root; el puerto de afuera no cambia.
+      - "${BIND_HOST:-127.0.0.1}:${WEB_PORT:-3000}:8080"
     depends_on:
       - web
       - api

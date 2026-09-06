@@ -177,12 +177,22 @@ next to `docker-compose.yml` (Compose merges it automatically):
 ```yaml
 services:
   proxy:
+    # This is the one place the gateway runs as root, and it is worth knowing
+    # why. It normally listens on 8080 as a non-root user, but here it has to
+    # bind 80 and 443 inside the container: ACME validates against those ports,
+    # and the HTTP-to-HTTPS redirect Caddy builds carries the wrong port if it
+    # listens elsewhere. `cap_add` does not cover it either — a capability does
+    # not reach a non-root user unless it is ambient, and `no-new-privileges`,
+    # which stays on, cancels file capabilities.
+    user: "0:0"
     volumes:
       - ./docker/Caddyfile.ondemand:/etc/caddy/Caddyfile:ro
       - caddy_data:/data          # persist issued certificates across restarts
     environment:
       PRIMARY_DOMAIN: app.youragency.com   # your main domain
-    ports:
+    # `!override` replaces the list instead of appending to it; without it the
+    # mapping to 8080 is left dangling, and nothing listens there in this mode.
+    ports: !override
       - "80:80"
       - "443:443"
 

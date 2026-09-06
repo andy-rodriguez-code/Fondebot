@@ -184,12 +184,22 @@ junto a `docker-compose.yml` (Compose lo combina automáticamente):
 ```yaml
 services:
   proxy:
+    # Este es el único caso donde el gateway corre como root, y conviene saber
+    # por qué. Por defecto escucha en 8080 sin privilegios, pero acá tiene que
+    # abrir el 80 y el 443 dentro del contenedor: ACME valida contra esos
+    # puertos, y el redirect de HTTP a HTTPS que arma Caddy sale con el puerto
+    # equivocado si escucha en otro. Ni `cap_add` alcanza, porque una capacidad
+    # no llega a un usuario sin root salvo que sea ambiental, y
+    # `no-new-privileges` —que sigue puesto— anula las capacidades de archivo.
+    user: "0:0"
     volumes:
       - ./docker/Caddyfile.ondemand:/etc/caddy/Caddyfile:ro
       - caddy_data:/data          # persist issued certificates across restarts
     environment:
       PRIMARY_DOMAIN: app.youragency.com   # your main domain
-    ports:
+    # `!override` reemplaza la lista en vez de sumarse a ella: sin esto queda
+    # colgado el mapeo al 8080, que en este modo no escucha nadie.
+    ports: !override
       - "80:80"
       - "443:443"
 
