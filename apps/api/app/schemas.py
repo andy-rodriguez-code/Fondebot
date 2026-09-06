@@ -678,3 +678,21 @@ class WhatsAppInboundResult(BaseModel):
 class WhatsAppOutboundConfirm(BaseModel):
     message_id: uuid.UUID
     external_message_id: str = Field(min_length=1, max_length=255)
+
+
+class ErrorEventOut(ORMModel):
+    """Espejo de lectura de ``ErrorEvent``. ``agency_id`` nunca se serializa:
+    ``is_global`` (calculado en el router) alcanza para que la página marque
+    una fila sin agencia sin exponer jamás un uuid de tenant ajeno."""
+
+    id: uuid.UUID
+    occurred_at: datetime
+    source: str
+    capture_kind: str
+    exception_type: str
+    message: str
+    traceback: str | None
+    request_method: str | None
+    request_path: str | None
+    subject_ref: str | None
+    is_global: bool = False

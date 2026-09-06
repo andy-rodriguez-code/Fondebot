@@ -20,6 +20,7 @@ from .routers import (
     dashboard,
     departments,
     domains,
+    health,
     mobile,
     portal,
     providers,
@@ -151,7 +152,14 @@ app.add_middleware(
 
 
 @app.get("/health", tags=["System"])
-def health():
+def liveness():
+    """Liveness: responde mientras el proceso esté vivo y NO toca la base.
+
+    Se llama ``liveness`` y no ``health`` porque este módulo importa el router
+    ``health``: una función con ese nombre lo pisaba, y ``health.router``
+    pasaba a buscar un atributo en una función. La ruta sigue siendo
+    ``/health``, que es lo que golpea el healthcheck de docker-compose.
+    """
     return {"status": "ok"}
 
 
@@ -165,6 +173,7 @@ app.include_router(providers.router, prefix="/api")
 app.include_router(catalog.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(health.router, prefix="/api")
 app.include_router(mobile.router, prefix="/api")
 app.include_router(portal.router, prefix="/api")
 app.include_router(whatsapp.router, prefix="/api")
