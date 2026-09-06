@@ -167,13 +167,15 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # Reports, does not gate — deliberately, and this is the part to revisit.
-      # Nothing has ever scanned this repository, so the first run is a backlog
-      # of pre-existing findings, not a regression. Turning the gate on before
-      # anyone has triaged them would block every merge and every image on day
-      # one, and the honest reaction to that is to delete the job. Triage the
-      # first report, then set `exit-code: 1` and add `scan` to publish's
-      # `needs`, which is a two-line change.
+      # This gates. The first run reported zero HIGH/CRITICAL findings across
+      # all four manifests, so there is no pre-existing backlog to grandfather
+      # in — which is the only reason a new scanner usually has to start in
+      # report-only mode. Starting from clean means the first failure is a real
+      # regression, introduced by the change that trips it.
+      #
+      # `ignore-unfixed` keeps it honest: it fails only on something the
+      # ecosystem has already published a fix for, so the answer is always to
+      # bump a version rather than to argue with the job.
       - name: Scan dependencies for known vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -181,7 +183,7 @@ jobs:
           scan-ref: .
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: "0"
+          exit-code: "1"
           format: table
 
   publish:
@@ -191,7 +193,7 @@ jobs:
     # make publishing wait on the checks. Across workflows it would take
     # `workflow_run`, which also fires when CI fails and checks out the branch
     # tip instead of the commit that passed.
-    needs: [api, web, whatsapp, mobile]
+    needs: [api, web, whatsapp, mobile, scan]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
