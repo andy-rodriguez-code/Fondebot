@@ -111,6 +111,15 @@ class Settings(BaseSettings):
     # Minutos de vigencia de un token de invitación (24 h por defecto).
     invitation_token_minutes: int = 1440
 
+    # Retención del registro nativo de errores (app/services/error_log.py):
+    # una fila más vieja que estos días, o más allá de este tope de filas
+    # (lo que se cumpla primero), se purga en el barrido en segundo plano.
+    # Ninguno de los dos límites solo alcanza: una ráfaga cabe entera dentro
+    # de la ventana de tiempo, y una instancia tranquila nunca llega al tope
+    # de filas. 0 desactiva ese límite en particular.
+    error_log_retention_days: int = 30
+    error_log_max_rows: int = 5000
+
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", APP_DIR / ".env"),
         env_file_encoding="utf-8",

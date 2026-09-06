@@ -640,6 +640,46 @@ class PortalInvitation(Base):
     department: Mapped["Department | None"] = relationship()
 
 
+class ErrorEvent(Base):
+    """Una fila por falla capturada: sitio y errores nativos, sin proveedor externo.
+
+    ``agency_id`` es nulo cuando la fila no se puede atar a un tenant (pre-auth,
+    arranque, un barrido en segundo plano); esa fila queda visible para
+    cualquier persona autenticada en vez de perderse en silencio (Spec:
+    Agency Scoping). ``message`` y ``traceback`` ya llegan redactados y
+    truncados desde ``services/error_log.py`` — este modelo no aplica ningún
+    filtro, solo persiste lo que ya fue saneado.
+    """
+
+    __tablename__ = "error_events"
+    # Espejo exacto de los índices de la migración 0029, nombre por nombre.
+    # Ninguna columna usa index=True: eso generaría un tercer índice que la
+    # migración no crea, y la suite (que arma el esquema con create_all)
+    # dejaría pasar en verde una divergencia que la base real sí tiene — el
+    # mismo defecto W1 encontrado al verificar agent-invitation-email.
+    __table_args__ = (
+        Index("ix_error_events_occurred_at", "occurred_at"),
+        Index("ix_error_events_agency_id_occurred_at", "agency_id", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    # Sin server_default, igual que portal_invitations.created_at (0028): el
+    # default de Python es la única fuente del valor, así los dos lados nunca
+    # pueden divergir.
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    agency_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agencies.id", ondelete="CASCADE"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(60))
+    capture_kind: Mapped[str] = mapped_column(String(20))
+    exception_type: Mapped[str] = mapped_column(String(120))
+    message: Mapped[str] = mapped_column(Text)
+    traceback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_method: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    request_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
 class PushDevice(Base):
     """Un teléfono que pidió que le avisen cuando una conversación necesita una
     persona.
