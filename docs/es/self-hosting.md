@@ -243,7 +243,7 @@ copia `.env.docker.example` a `.env.docker` y reemplaza cada `CHANGE_*`.
 | `SECRET_KEY` | Backend | Firma las sesiones de agencia y de portal. |
 | `ENCRYPTION_KEY` | Backend / datos persistidos | Cifra las claves de API, el QR y la sesión de WhatsApp. **No debe cambiar** una vez guardados los secretos. |
 | `WHATSAPP_BRIDGE_TOKEN` | Backend y puente | Autentica las llamadas privadas entre backend y puente. |
-| `FRONTEND_URL` | Backend | Origen permitido por CORS (solo hace falta si sirves la API en otro origen). |
+| `FRONTEND_URL` | Backend | La URL publica con la que se llega a la app. Ademas de CORS, arma el enlace de aceptar invitacion y la URL del webhook de WhatsApp Cloud. Si queda en el valor por defecto, esos dos enlaces apuntan a `localhost` y nadie los puede usar. |
 | `NEXT_PUBLIC_API_URL` | Navegador / build del frontend | Déjala vacía (por defecto): el navegador llama a la API por el gateway con un `/api` relativo. Ponla solo para apuntar el frontend a una API en otro origen (se fija en tiempo de build). |
 | `COOKIE_SECURE` | Backend | `true` detrás de HTTPS, para que la cookie de sesión solo viaje por TLS. |
 | `COOKIE_SAMESITE` | Backend | `lax` (por defecto); `none` cuando frontend y API están en sitios distintos (exige `COOKIE_SECURE=true`). |
