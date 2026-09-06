@@ -238,6 +238,53 @@ jobs:
         if: always()
         run: '[ -f .env.docker ] && docker compose --env-file .env.docker down -v || true'
 
+  guard:
+    name: guard (no internal content)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Hace falta la base para comparar contra ella.
+          fetch-depth: 0
+
+      # El guardian de .githooks/pre-commit era opt-in por clon: quien no corria
+      # `git config core.hooksPath .githooks` no tenia ninguno, y en este repo
+      # publico eso significa que nada impedia subir contenido interno. Aca deja
+      # de ser opcional.
+      #
+      # Este job no reimplementa el hook: lo ejecuta. Los marcadores viven
+      # literalmente dentro de el, asi que copiarlos a un segundo archivo haria
+      # que ese archivo dispare el guardian que describe.
+      - name: Prove the guard still blocks
+        run: |
+          set -euo pipefail
+          # Se arma en dos partes a proposito: escrito entero, esta linea seria
+          # justo lo que el guardian bloquea.
+          marker="DO-NOT""-COMMIT"
+          echo "$marker" > guard-selftest.txt
+          git add guard-selftest.txt
+          if .githooks/pre-commit; then
+            echo "El guardian dejo pasar un marcador: no esta protegiendo nada."
+            exit 1
+          fi
+          echo "El guardian bloquea."
+          git reset -q HEAD guard-selftest.txt
+          rm -f guard-selftest.txt
+
+      - name: Run the guard over this branch
+        run: |
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha || github.event.before }}'
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="$(git rev-parse HEAD~1)"
+          fi
+          echo "Comparando contra $base"
+          # El hook mira el indice. Moviendo HEAD a la base sin tocar el arbol,
+          # todo lo que aporta esta rama queda staged, que es exactamente la
+          # forma que el hook sabe revisar.
+          git reset --soft "$base"
+          .githooks/pre-commit
+
   publish:
     name: publish ${{ matrix.service }} image
     # The whole point of this job living here rather than in its own workflow:
@@ -245,7 +292,7 @@ jobs:
     # make publishing wait on the checks. Across workflows it would take
     # `workflow_run`, which also fires when CI fails and checks out the branch
     # tip instead of the commit that passed.
-    needs: [api, web, whatsapp, mobile, scan, stack]
+    needs: [api, web, whatsapp, mobile, scan, stack, guard]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
