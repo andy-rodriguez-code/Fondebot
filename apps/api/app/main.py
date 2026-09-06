@@ -12,6 +12,7 @@ from .services.conversation_state import resolve_idle_ai_conversations
 from .services.error_log import purge_error_events, record_error
 from .routers import (
     agency,
+    audit,
     agent_tools,
     agents,
     auth,
@@ -193,6 +194,7 @@ def liveness():
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(agency.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
 app.include_router(clients.router, prefix="/api")
 app.include_router(departments.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")

@@ -640,6 +640,47 @@ class PortalInvitation(Base):
     department: Mapped["Department | None"] = relationship()
 
 
+class AuditLog(Base):
+    """Quien hizo que, y cuando. Append-only.
+
+    Existe para la pregunta que se hace despues de un incidente: quien cambio
+    esa credencial, quien dio de alta a esa persona, quien edito esas
+    instrucciones. Sin esto no hay forma de saberlo, porque las tablas de
+    negocio guardan el estado actual y no como se llego a el.
+
+    Dos decisiones que sostienen el resto:
+
+    ``actor_label`` guarda el correo o el nombre TAL COMO ERA en ese momento, en
+    vez de depender de un join. Una fila de auditoria que se vuelve ilegible
+    cuando se borra la cuenta que la genero no sirve para nada, y ese es
+    justamente el caso en el que se la va a leer.
+
+    No hay columna con el detalle del cambio. Guardar "que cambio" en un cambio
+    de credencial significa guardar la credencial. Se registra que paso, sobre
+    que, y nada mas.
+    """
+
+    __tablename__ = "audit_log"
+    # Espejo exacto del indice de la migracion 0030, nombre por nombre, y sin
+    # index=True en ninguna columna: la suite arma el esquema con create_all y
+    # la base real sale de la migracion, asi que un nombre presente en uno y
+    # ausente en el otro es una divergencia que CI no puede ver.
+    __table_args__ = (Index("ix_audit_log_agency_id_created_at", "agency_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"))
+    # user | portal_user | system
+    actor_type: Mapped[str] = mapped_column(String(20))
+    # Nulo cuando actua el propio sistema, o cuando la cuenta ya no existe.
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    actor_label: Mapped[str] = mapped_column(String(180))
+    action: Mapped[str] = mapped_column(String(60))
+    target_type: Mapped[str] = mapped_column(String(40))
+    target_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    target_label: Mapped[str] = mapped_column(String(180), default="")
+
+
 class ErrorEvent(Base):
     """Una fila por falla capturada: sitio y errores nativos, sin proveedor externo.
 
