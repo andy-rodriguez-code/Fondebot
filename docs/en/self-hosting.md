@@ -234,7 +234,7 @@ that client's portal. The portal must be **published** for the domain to serve.
 | `SECRET_KEY` | Backend | Signs the agency and portal sessions. |
 | `ENCRYPTION_KEY` | Backend / persisted data | Encrypts API keys, QR and the WhatsApp session. **Must not change** after secrets are stored. |
 | `WHATSAPP_BRIDGE_TOKEN` | Backend + bridge | Authenticates the private backend↔bridge calls. |
-| `FRONTEND_URL` | Backend | Origin allowed by CORS (only needed if you serve the API on a separate origin). |
+| `FRONTEND_URL` | Backend | The public URL the app is reached at. Besides CORS it builds the invitation accept link and the WhatsApp Cloud webhook URL. Left at the default, both point at `localhost` and nobody can use them. |
 | `NEXT_PUBLIC_API_URL` | Browser / frontend build | Leave empty (default): the browser calls the API through the gateway with relative `/api`. Set it only to point the frontend at an API on a separate origin (baked at build time). |
 | `COOKIE_SECURE` | Backend | `true` behind HTTPS so the session cookie is only sent over TLS. |
 | `COOKIE_SAMESITE` | Backend | `lax` (default); `none` when the frontend and API are on different sites (requires `COOKIE_SECURE=true`). |

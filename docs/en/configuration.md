@@ -27,7 +27,7 @@ For a non-Docker local setup, the same variables go in a `.env` at the repo root
 | `COOKIE_SECURE` | Send the session cookie only over HTTPS. Set `true` in production | `false` |
 | `COOKIE_SAMESITE` | Cookie SameSite policy. Use `none` when the frontend and API are on different sites (requires `COOKIE_SECURE=true`) | `lax` |
 | `RATE_LIMIT_ENABLED` | Per-IP rate limiting on public endpoints (auth, portal login, widget) | `true` |
-| `FRONTEND_URL` | Origin allowed by CORS | `http://localhost:3000` |
+| `FRONTEND_URL` | The public URL of this deployment. Besides CORS it builds the invitation accept link and the webhook URL you paste into Meta, so it has to be reachable from outside. Change it together with `WEB_PORT` | `http://localhost:3000` |
 | `WHATSAPP_BRIDGE_TOKEN` | Shared secret authenticating backend ↔ WhatsApp bridge calls. Use the same value on both | random |
 | `NEXT_PUBLIC_API_URL` | Public API origin baked into the frontend at build time. Leave empty to use the same origin via the gateway | empty |
 | `BACKEND_INTERNAL_URL` | How the web container reaches the API server-side (used by `proxy.ts` for custom portal domains) | `http://api:8000` |

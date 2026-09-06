@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://openlivery:openlivery@localhost:5432/openlivery"
     secret_key: str = INSECURE_VALUES["secret_key"][0]
     encryption_key: str = INSECURE_VALUES["encryption_key"][0]
+    # La URL publica del deployment: con la que alguien de afuera llega a la
+    # app. No es solo CORS, aunque el nombre lo sugiera. Se usa para armar dos
+    # enlaces que tienen que funcionar desde otra maquina:
+    #   - el de aceptar una invitacion (routers/departments.py)
+    #   - el del webhook que se pega en el panel de Meta (routers/whatsapp_cloud.py)
+    # Dejarla en el valor por defecto no falla en ningun lado: simplemente
+    # genera enlaces a localhost que solo sirven en el servidor. Y si cambias
+    # WEB_PORT, esta tiene que cambiar con el.
+    #
+    # No se deduce del pedido entrante a proposito: quien manda el header Host
+    # es quien llama, asi que un enlace armado con el se puede envenenar para
+    # que apunte a otro sitio llevando un token valido.
     frontend_url: str = "http://localhost:3000"
     access_token_minutes: int = 60 * 24 * 7
     # Flags de la cookie de sesión. Los valores por defecto sirven para HTTP

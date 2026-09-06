@@ -50,13 +50,19 @@ def _make_agent(client: TestClient, client_id: str, name: str = "Agente") -> dic
 
 
 def _department_with_invite(
-    client: TestClient, client_id: str, agent_id: str, *, invite_email: str | None, invite_name: str = ""
+    client: TestClient,
+    client_id: str,
+    agent_id: str,
+    *,
+    invite_email: str | None,
+    invite_name: str = "",
+    headers: dict | None = None,
 ) -> dict:
     payload = {"name": "Soporte", "agent_id": agent_id}
     if invite_email:
         payload["invite_email"] = invite_email
         payload["invite_name"] = invite_name
-    response = client.post(f"/api/clients/{client_id}/departments", json=payload)
+    response = client.post(f"/api/clients/{client_id}/departments", json=payload, headers=headers or {})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -198,6 +204,40 @@ def test_department_create_with_email_returns_manual_link_when_provider_is_none(
     assert invitation["delivery"] == "manual"
     assert invitation["accept_url"] is not None
     assert f"/portal/{customer['portal_slug']}/invite?token=" in invitation["accept_url"]
+
+
+def test_the_accept_link_comes_from_the_configured_url_not_the_request(
+    authenticated_client: TestClient, monkeypatch
+):
+    """De donde sale el origen del enlace, que es una decision de seguridad.
+
+    El resto de los tests miran el camino del enlace y no su origen, asi que
+    alguien podria armarlo con el header `Host` del pedido y todos seguirian
+    pasando. Eso abriria un agujero: el `Host` lo elige quien llama, y un
+    enlace armado con el se puede apuntar a otro sitio llevando un token
+    valido, que es exactamente lo que hay que proteger.
+
+    Por eso el origen sale de `frontend_url`, que es configuracion. Es tambien
+    la razon de que ese valor tenga que apuntar a la URL publica de verdad: si
+    queda en el default, el enlace funciona solo en el propio servidor.
+    """
+    monkeypatch.setattr(get_settings(), "frontend_url", "https://portal.ejemplo.com")
+    client = authenticated_client
+    customer = _make_client(client)
+    agent = _make_agent(client, customer["id"])
+
+    department = _department_with_invite(
+        client,
+        customer["id"],
+        agent["id"],
+        invite_email="invitada@example.com",
+        invite_name="Invitada",
+        headers={"Host": "atacante.example"},
+    )
+
+    accept_url = department["invitation"]["accept_url"]
+    assert accept_url.startswith("https://portal.ejemplo.com/portal/")
+    assert "atacante" not in accept_url
 
 
 def test_inviting_an_existing_active_portal_user_returns_409(authenticated_client: TestClient):
