@@ -120,3 +120,24 @@ sweep runs anyway and picks the new value up on its next pass, every six hours.
 The file goes, the conversation stays: the message keeps its text and its
 transcription, so the case still reads end to end. Only the original file is
 missing afterwards.
+
+## Logs
+
+Every request gets an identifier that appears on every line that request
+produces — uvicorn's access lines included — and comes back in the response's
+`X-Request-Id` header. That header is the point: whoever reports a problem can
+quote it, and it leads straight to their lines instead of everything that
+happened at that hour.
+
+| Variable | What it does | Default |
+| --- | --- | --- |
+| `LOG_FORMAT` | `text` reads well in `docker compose logs`; `json` is for shipping them somewhere | `text` |
+| `LOG_LEVEL` | Minimum level | `INFO` |
+
+An incoming `X-Request-Id` is honoured, so a trace that started in another
+service is not cut here — but only if its shape is harmless. A header value
+that ends up written to a log lets the caller insert newlines and forge entries
+that never happened.
+
+The identifier travels to the WhatsApp bridge too, so lines from both processes
+can be tied together.

@@ -134,6 +134,11 @@ class Settings(BaseSettings):
     # es el valor por defecto a proposito: actualizar no puede empezar a borrar
     # datos de alguien sin que lo haya pedido.
     attachment_retention_days: int = 0
+    # "text" es legible en `docker compose logs`, que es como la mayoría los
+    # mira; "json" es para quien los manda a algún lado. Las dos formas llevan
+    # el identificador del pedido.
+    log_format: str = "text"
+    log_level: str = "INFO"
     error_log_retention_days: int = 30
     error_log_max_rows: int = 5000
 

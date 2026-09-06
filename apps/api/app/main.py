@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import new_session
+from .logging_setup import configure_logging, current_request_id, set_request_id
 from .services.attachments import purge_attachments
 from .services.conversation_state import resolve_idle_ai_conversations
 from .services.error_log import purge_error_events, record_error
@@ -34,6 +35,7 @@ from .routers import (
 
 
 settings = get_settings()
+configure_logging(log_format=settings.log_format, level=settings.log_level)
 logger = logging.getLogger(__name__)
 
 AUTO_RESOLVE_SWEEP_SECONDS = 15 * 60
@@ -116,6 +118,45 @@ async def lifespan(_: FastAPI):
         attachment_purger.cancel()
 
 
+class RequestIdMiddleware:
+    """Le pone un identificador a cada pedido y lo devuelve en la respuesta.
+
+    ASGI puro, igual que la captura de errores, y por el mismo motivo: no
+    bufferiza la respuesta ni la reconstruye. Se envuelve ``send`` solo para
+    sumar una cabecera al arrancar la respuesta.
+
+    Va por FUERA de ``ErrorCaptureMiddleware`` —o sea, se registra después—
+    para que el identificador ya esté fijado cuando esa capa registra una
+    falla. Adentro no serviría de nada: la excepción sube desde donde el valor
+    todavía no existe.
+
+    La cabecera de vuelta es el punto: quien reporta un problema puede citar
+    ese identificador y con eso se llega directo a sus líneas.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        incoming = ""
+        for name, value in scope.get("headers", []):
+            if name == b"x-request-id":
+                incoming = value.decode("latin-1", "replace")
+                break
+        request_id = set_request_id(incoming)
+
+        async def send_with_id(message):
+            if message["type"] == "http.response.start":
+                message.setdefault("headers", [])
+                message["headers"].append((b"x-request-id", request_id.encode()))
+            await send(message)
+
+        await self.app(scope, receive, send_with_id)
+
+
 class ErrorCaptureMiddleware:
     """ASGI puro — deliberadamente NO ``@app.exception_handler(Exception)``.
 
@@ -167,6 +208,9 @@ app = FastAPI(
 # fuera de ExceptionMiddleware — CORS sigue siendo la capa más externa incluso
 # en un 500, y HTTPException queda excluido antes de llegar acá.
 app.add_middleware(ErrorCaptureMiddleware)
+# Después de la captura de errores, así queda por fuera de ella: el
+# identificador tiene que estar puesto cuando esa capa registra la falla.
+app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     # El origen del frontend configurado (un dominio real en producción) más
