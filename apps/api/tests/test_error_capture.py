@@ -82,12 +82,24 @@ def test_normal_http_errors_are_not_recorded(lenient_client):
 # --- Callback de debounce (2.4 / 2.6) ---------------------------------------
 
 
-def test_a_cancelled_debounce_timer_records_nothing(monkeypatch):
+def test_a_cancelled_debounce_timer_records_nothing_and_does_not_break_the_callback(monkeypatch):
+    """Afirmar solo "no se escribió fila" NO detecta que falte el guard.
+
+    ``Task.exception()`` lanza ``CancelledError``, pero ``asyncio.Handle._run``
+    atrapa ``BaseException`` y la manda al manejador de excepciones del loop,
+    así que sin el guard tampoco se escribe fila y el conteo en cero pasa
+    igual. Lo que discrimina es que el callback haya terminado limpio: acá se
+    instala un manejador propio y se exige que el loop nunca lo llame.
+    """
     conversation_id = uuid.uuid4()
     agency_id = uuid.uuid4()
     monkeypatch.setattr(get_settings(), "reply_debounce_seconds", 0.2)
+    loop_failures: list[dict] = []
 
     async def scenario():
+        asyncio.get_running_loop().set_exception_handler(
+            lambda _loop, context: loop_failures.append(context)
+        )
         # La segunda llamada cancela el temporizador de la primera: es el
         # tráfico sano de cada mensaje nuevo del visitante, no una falla.
         inbound_service.schedule_debounced_reply(conversation_id, agency_id)
@@ -97,6 +109,8 @@ def test_a_cancelled_debounce_timer_records_nothing(monkeypatch):
 
     asyncio.run(scenario())
 
+    # Esta es la aserción que cae si alguien saca el `if finished.cancelled()`.
+    assert loop_failures == [], loop_failures
     with SessionLocal() as db:
         assert db.query(ErrorEvent).count() == 0
 

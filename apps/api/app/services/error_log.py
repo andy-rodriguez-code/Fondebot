@@ -34,6 +34,13 @@ REDACTED = "[redacted]"
 # str(exc)[:400] es la convención existente en whatsapp_inbound.py:378,477.
 MESSAGE_MAX_LENGTH = 400
 TRACEBACK_MAX_LENGTH = 8000
+# Espejo de los largos de columna de ErrorEvent (models.py). Todo lo que entra
+# se recorta acá: un valor más largo que su columna hace fallar el INSERT del
+# error, y la fila se pierde justo cuando más se la necesita.
+REQUEST_METHOD_MAX_LENGTH = 10
+REQUEST_PATH_MAX_LENGTH = 300
+SUBJECT_REF_MAX_LENGTH = 120
+EXCEPTION_TYPE_MAX_LENGTH = 120
 
 # Un secreto de menos de 8 caracteres se salta, incluida la cadena vacía:
 # smtp_password legítimamente vale "" (config.py) y "hola".replace("", "X")
@@ -46,9 +53,17 @@ _BEARER_PATTERN = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
 _SK_PATTERN = re.compile(r"sk-[A-Za-z0-9]{8,}")
 # El grupo 1 (la etiqueta) se conserva a propósito: quien opera necesita saber
 # que ACÁ había un token, no solo que algo fue removido.
+# ``['\"]?`` entre la etiqueta y el separador: en el repr de un dict de Python
+# la comilla de cierre se mete en el medio — ``'password_hash': '...'`` — y sin
+# eso el patrón no matchea justo donde más importa.
 _LABELLED_PATTERN = re.compile(
-    r"(api[_-]?key|token|password|secret|authorization)\s*[=:]\s*\S+", re.IGNORECASE
+    r"(api[_-]?key|token|password|secret|authorization)\w*['\"]?\s*[=:]\s*\S+", re.IGNORECASE
 )
+# SQLAlchemy le pega "[SQL: ...] [parameters: {...}]" al texto de cualquier
+# StatementError, y esos parámetros son la fila que se estaba escribiendo. El
+# engine ya lo apaga con hide_parameters=True (database.py); esto es la segunda
+# línea, para cualquier excepción que llegue de otro engine o de otra versión.
+_SQL_TAIL_PATTERN = re.compile(r"\[SQL:.*", re.DOTALL)
 _QUERY_STRING_PATTERN = re.compile(r"(https?://[^\s\"'<>]+)\?[^\s\"'<>]*")
 
 # Reentrancia: hoy no es alcanzable (el except de record_error no vuelve a
@@ -77,6 +92,9 @@ def redact(text: str, secrets: Iterable[str] = ()) -> str:
     result = _LABELLED_PATTERN.sub(rf"\1={REDACTED}", result)
     # 3) Ninguna query string se guarda jamás, matchee o no alguna forma.
     result = _QUERY_STRING_PATTERN.sub(rf"\1?{REDACTED}", result)
+    # 4) Y nada de lo que SQLAlchemy adjunta después de "[SQL:": ahí viaja la
+    #    consulta con sus parámetros ligados, o sea la fila entera.
+    result = _SQL_TAIL_PATTERN.sub(REDACTED, result)
     return result
 
 
@@ -84,7 +102,10 @@ def redact(text: str, secrets: Iterable[str] = ()) -> str:
 # escrita a mano se desactualiza el día que alguien agrega un secreto nuevo, y
 # el costo de ese olvido es un secreto guardado en claro para siempre. Redactar
 # de más nunca hace daño; redactar de menos sí.
-_SECRET_FIELD_WORDS = ("secret", "password", "token", "key")
+#     "database_url" no contiene ninguna de estas palabras y sin embargo lleva
+#     la contraseña de Postgres adentro, así que va aparte: es exactamente el
+#     agujero que una lista derivada existe para no tener.
+_SECRET_FIELD_WORDS = ("secret", "password", "token", "key", "database_url")
 
 
 def _live_secrets() -> list[str]:
@@ -141,12 +162,17 @@ def record_error(
                     agency_id=agency_id,
                     source=source,
                     capture_kind=capture_kind,
-                    exception_type=type(exc).__name__,
+                    exception_type=type(exc).__name__[:EXCEPTION_TYPE_MAX_LENGTH],
                     message=message,
                     traceback=stack,
-                    request_method=request_method,
-                    request_path=request_path,
-                    subject_ref=subject_ref,
+                    # Truncados como message y traceback, y no pasados tal
+                    # cual: la ruta la elige quien llama, y una más larga que
+                    # la columna hace fallar el INSERT del propio error. La
+                    # fila se perdía en silencio, o sea justo el caso que este
+                    # registro existe para no dejar pasar.
+                    request_method=(request_method or None) and request_method[:REQUEST_METHOD_MAX_LENGTH],
+                    request_path=(request_path or None) and request_path[:REQUEST_PATH_MAX_LENGTH],
+                    subject_ref=(subject_ref or None) and subject_ref[:SUBJECT_REF_MAX_LENGTH],
                 )
             )
             db.commit()

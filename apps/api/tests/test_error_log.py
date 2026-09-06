@@ -240,3 +240,114 @@ def test_live_secrets_is_derived_and_not_a_hand_kept_list():
 
     # Integers whose name contains a secret word must not be swept in.
     assert all(isinstance(value, str) for value in covered)
+
+
+class _FakeStatementError(Exception):
+    """Con la forma que SQLAlchemy le da a una StatementError.
+
+    El texto real de IntegrityError/DataError/OperationalError termina con
+    "[SQL: ...] [parameters: {...}]", y esos parámetros son la fila que se
+    estaba escribiendo. No se importa la clase real para no depender de su
+    constructor entre versiones: lo que se prueba es el TEXTO.
+    """
+
+
+def test_sql_bound_parameters_never_reach_a_stored_row():
+    """La fuga que la verificación encontró, en su forma exacta.
+
+    Se filtraba por tres eslabones a la vez: el engine adjuntaba los
+    parámetros, el patrón de etiqueta no matchea el repr de un dict de Python
+    porque la comilla de cierre queda entre la etiqueta y los dos puntos, y el
+    truncado por la cola preserva justo el final, que es donde viven. Y las
+    capturas HTTP van sin agencia, o sea visibles para todas.
+    """
+    leaked = (
+        "duplicate key value violates unique constraint\n"
+        "[SQL: INSERT INTO portal_users (email, password_hash) VALUES (%(email)s, %(password_hash)s)]\n"
+        "[parameters: {'email': 'ana@cliente.com', 'password_hash': '$2b$12$abcdefghijklmnop'}]"
+    )
+    error_log.record_error(source="test", capture_kind="handler", exc=_FakeStatementError(leaked))
+
+    with SessionLocal() as db:
+        row = db.query(ErrorEvent).one()
+        for stored in (row.message, row.traceback):
+            assert "ana@cliente.com" not in stored
+            assert "$2b$12$abcdefghijklmnop" not in stored
+            assert "parameters:" not in stored
+
+
+def test_the_engine_itself_does_not_attach_bound_parameters():
+    """Segunda capa: la redacción tapa el texto, pero la fuente es el engine.
+
+    hide_parameters=True lo apaga de raíz, y también protege a los logs y a
+    cualquier otro consumidor del texto de la excepción, no solo a esta tabla.
+    """
+    from app.database import engine
+
+    assert engine.hide_parameters is True
+
+
+def test_a_path_longer_than_its_column_does_not_lose_the_row():
+    """El valor lo elige quien llama. Sin recortarlo, el INSERT del propio
+    error fallaba y la fila se perdía en silencio — justo el caso que este
+    registro existe para no dejar pasar."""
+    error_log.record_error(
+        source="test",
+        capture_kind="handler",
+        exc=ValueError("x"),
+        request_path="/" + ("a" * 500),
+        request_method="GET" + ("!" * 40),
+        subject_ref="s" * 400,
+    )
+
+    with SessionLocal() as db:
+        row = db.query(ErrorEvent).one()
+        assert len(row.request_path) == error_log.REQUEST_PATH_MAX_LENGTH
+        assert len(row.request_method) == error_log.REQUEST_METHOD_MAX_LENGTH
+        assert len(row.subject_ref) == error_log.SUBJECT_REF_MAX_LENGTH
+
+
+def test_the_traceback_column_is_redacted_too_and_not_only_the_message(monkeypatch):
+    """El escenario del spec dice "toda columna guardada, incluida traceback".
+    Lo que había afirmaba solo `message`."""
+    secret = "un-secreto-largo-de-verdad"
+    monkeypatch.setattr(error_log, "_live_secrets", lambda: [secret])
+
+    def _raise_with_the_secret():
+        raise ValueError(f"fallo con {secret} adentro")
+
+    try:
+        _raise_with_the_secret()
+    except ValueError as exc:
+        error_log.record_error(source="test", capture_kind="explicit", exc=exc)
+
+    with SessionLocal() as db:
+        row = db.query(ErrorEvent).one()
+        assert secret not in row.traceback
+        assert secret not in row.message
+        # Y sigue sirviendo para lo que existe: el frame que rompió está.
+        assert "_raise_with_the_secret" in row.traceback
+
+
+def test_a_long_traceback_keeps_its_innermost_frames(monkeypatch):
+    """El test anterior recursaba 300 veces sobre una línea, y
+    StackSummary.format colapsa los frames repetidos ("[Previous line repeated
+    N more times]"), así que el stack quedaba muy por debajo del límite y el
+    truncado no se ejercitaba nunca. Acá el largo se fuerza de verdad."""
+    padding = "x" * (error_log.TRACEBACK_MAX_LENGTH * 2)
+
+    def _the_innermost_frame():
+        raise ValueError(padding)
+
+    try:
+        _the_innermost_frame()
+    except ValueError as exc:
+        error_log.record_error(source="test", capture_kind="explicit", exc=exc)
+
+    with SessionLocal() as db:
+        row = db.query(ErrorEvent).one()
+        assert len(row.traceback) == error_log.TRACEBACK_MAX_LENGTH
+        # Truncado por la cola: lo que sobrevive es el final, que es donde
+        # está la respuesta a "dónde rompió". Se busca la subcadena y no un
+        # endswith: format_exception cierra con un salto de línea.
+        assert padding[-50:] in row.traceback
