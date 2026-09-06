@@ -56,3 +56,27 @@ El puente de WhatsApp escucha en `3101` pero no se publica al host en Docker.
 ## El gateway de origen único
 
 Un contenedor Caddy (`docker/Caddyfile`) sirve toda la pila en un único origen. Enruta `/api/*` al backend y todo lo demás al frontend, de modo que el navegador habla con un solo puerto y `NEXT_PUBLIC_API_URL` puede quedar vacío. La pila sirve solo HTTP plano: coloca tu propio reverse proxy delante del gateway para TLS en producción. Consulta [Autoalojamiento](self-hosting.md) para un despliegue público.
+
+## Límites de recursos
+
+Cada contenedor tiene un techo de memoria y de CPU, para que un servicio
+desbocado no se lleve puesta la máquina entera. Son límites, no reservas: no se
+aparta nada, y solo se sienten bajo presión real.
+
+Se suben desde `.env.docker`, sin editar `docker-compose.yml`. Si un contenedor
+muere con código 137, tocó su techo de memoria: ese es el número a subir, y la
+API es la que hay que mirar cuando una base de conocimiento crece.
+
+| Variable | Servicio | Por defecto |
+| --- | --- | --- |
+| `DB_MEMORY_LIMIT` / `DB_CPU_LIMIT` | PostgreSQL | `1g` / `1.0` |
+| `API_MEMORY_LIMIT` / `API_CPU_LIMIT` | Backend | `1g` / `2.0` |
+| `WEB_MEMORY_LIMIT` / `WEB_CPU_LIMIT` | Frontend | `512m` / `1.0` |
+| `WHATSAPP_MEMORY_LIMIT` / `WHATSAPP_CPU_LIMIT` | Puente de WhatsApp | `512m` / `1.0` |
+| `PROXY_MEMORY_LIMIT` / `PROXY_CPU_LIMIT` | Gateway | `128m` / `0.5` |
+
+Además, los cinco contenedores corren con `no-new-privileges`, y ninguno corre
+como root: `api`, `web` y `whatsapp` traen su propio usuario, el gateway corre
+como `gateway` escuchando en 8080, y PostgreSQL baja al suyo en el arranque. La
+única excepción es el gateway con dominios propios, y está explicada en
+`self-hosting.md`.

@@ -186,6 +186,58 @@ jobs:
           exit-code: "1"
           format: table
 
+  stack:
+    name: stack (compose boots and stays hardened)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Este job existe porque el resto de CI no toca docker-compose.yml: hasta
+      # ahora se podía romper el arranque del stack y llegar a main con todo en
+      # verde. Y las afirmaciones de más abajo son la única prueba de que el
+      # endurecimiento sigue puesto, que es distinto de que esté escrito.
+      - name: Generate secrets
+        run: ./scripts/generate-docker-env.sh
+
+      - name: Build and start the stack
+        run: docker compose --env-file .env.docker up --build -d --wait --wait-timeout 300
+
+      - name: The gateway serves the app
+        run: |
+          set -eu
+          curl --fail --silent --show-error --max-time 20 http://127.0.0.1:3000/login > /dev/null
+          # Y llega al backend por el mismo origen, que es el punto del gateway.
+          curl --fail --silent --show-error --max-time 20 http://127.0.0.1:3000/api/auth/status > /dev/null
+
+      - name: The gateway does not run as root
+        run: |
+          set -eu
+          uid=$(docker compose --env-file .env.docker exec -T proxy id -u)
+          echo "gateway uid: $uid"
+          test "$uid" != "0"
+
+      - name: Every container refuses new privileges and has a memory ceiling
+        run: |
+          set -eu
+          for name in openlivery_db openlivery_api openlivery_web openlivery_whatsapp openlivery_proxy; do
+            opts=$(docker inspect --format '{{.HostConfig.SecurityOpt}}' "$name")
+            case "$opts" in
+              *no-new-privileges:true*) ;;
+              *) echo "$name: falta no-new-privileges (got: $opts)"; exit 1 ;;
+            esac
+            memory=$(docker inspect --format '{{.HostConfig.Memory}}' "$name")
+            test "$memory" -gt 0 || { echo "$name: sin limite de memoria"; exit 1; }
+            echo "$name: ok ($opts, memory=$memory)"
+          done
+
+      - name: Show logs when something failed
+        if: failure()
+        run: docker compose --env-file .env.docker logs --tail 120
+
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env.docker down -v
+
   publish:
     name: publish ${{ matrix.service }} image
     # The whole point of this job living here rather than in its own workflow:
@@ -193,7 +245,7 @@ jobs:
     # make publishing wait on the checks. Across workflows it would take
     # `workflow_run`, which also fires when CI fails and checks out the branch
     # tip instead of the commit that passed.
-    needs: [api, web, whatsapp, mobile, scan]
+    needs: [api, web, whatsapp, mobile, scan, stack]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
@@ -208,6 +260,8 @@ jobs:
             context: ./apps/web
           - service: whatsapp
             context: ./apps/whatsapp
+          - service: proxy
+            context: ./docker/proxy
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

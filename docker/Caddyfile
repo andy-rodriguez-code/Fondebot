@@ -1,7 +1,12 @@
 # Internal HTTP gateway: one origin for the whole app. "/api/*" is routed to the
 # backend and everything else to the frontend. TLS is handled by the operator's
 # own reverse proxy placed in front of this service in production.
-:80 {
+#
+# 8080 y no 80: el contenedor corre sin root (docker/proxy/Dockerfile) y un
+# proceso sin root no puede abrir un puerto por debajo de 1024. El puerto que ve
+# quien se conecta lo define el mapeo de compose, así que esto no cambia nada de
+# afuera.
+:8080 {
 	handle /api/* {
 		reverse_proxy api:8000 {
 			# Overwrite instead of appending: the default behaviour keeps whatever

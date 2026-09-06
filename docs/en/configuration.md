@@ -56,3 +56,26 @@ The WhatsApp bridge listens on `3101` but is not published to the host in Docker
 ## The single-origin gateway
 
 A Caddy container (`docker/Caddyfile`) fronts the whole stack on one origin. It routes `/api/*` to the backend and everything else to the frontend, so the browser talks to a single port and `NEXT_PUBLIC_API_URL` can stay empty. The stack serves plain HTTP only — put your own reverse proxy in front of the gateway for TLS in production. See [Self-hosting](self-hosting.md) for a public deployment.
+
+## Resource limits
+
+Every container has a memory and CPU ceiling, so one runaway service cannot take
+the whole host down with it. These are limits, not reservations: nothing is held
+aside, and a container only feels them under real pressure.
+
+Raise them from `.env.docker` rather than editing `docker-compose.yml`. If a
+container dies with exit code 137, it hit its memory ceiling — that is the number
+to raise, and the API is the one to watch when a knowledge base grows.
+
+| Variable | Service | Default |
+| --- | --- | --- |
+| `DB_MEMORY_LIMIT` / `DB_CPU_LIMIT` | PostgreSQL | `1g` / `1.0` |
+| `API_MEMORY_LIMIT` / `API_CPU_LIMIT` | Backend | `1g` / `2.0` |
+| `WEB_MEMORY_LIMIT` / `WEB_CPU_LIMIT` | Frontend | `512m` / `1.0` |
+| `WHATSAPP_MEMORY_LIMIT` / `WHATSAPP_CPU_LIMIT` | WhatsApp bridge | `512m` / `1.0` |
+| `PROXY_MEMORY_LIMIT` / `PROXY_CPU_LIMIT` | Gateway | `128m` / `0.5` |
+
+All five containers also run with `no-new-privileges`, and none runs as root:
+`api`, `web` and `whatsapp` carry their own user, the gateway runs as `gateway`
+listening on 8080, and PostgreSQL drops to its own user at startup. The one
+exception is the gateway under custom domains, explained in `self-hosting.md`.
