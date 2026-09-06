@@ -29,6 +29,7 @@ from ..database import new_session
 from ..models import Client, PortalInvitation, now_utc
 from ..security import generate_invitation_token, hash_invitation_token
 from .emails import Email, send_email
+from .error_log import record_error
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,16 @@ def send_invitation_email(invitation_id: uuid.UUID, email: Email) -> None:
             logger.error("No se pudo entregar la invitación %s: %s", invitation_id, exc)
             invitation.delivery_error = f"{type(exc).__name__}: {exc}"[:DELIVERY_ERROR_MAX_LENGTH]
             invitation.delivered_at = None
+            # Además de delivery_error (visible en el panel), una fila en el
+            # registro nativo de errores: mismo fallo, capturado con su
+            # traceback y con la agencia dueña de la invitación.
+            record_error(
+                source="invitations.email",
+                capture_kind="explicit",
+                exc=exc,
+                agency_id=invitation.client.agency_id,
+                subject_ref=f"invitation:{invitation_id}",
+            )
         else:
             invitation.delivered_at = now_utc()
             invitation.delivery_error = None
