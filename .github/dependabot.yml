@@ -1,0 +1,47 @@
+version: 2
+
+# Nothing told us about a vulnerable dependency before this file existed, and
+# nothing bumped the SHA-pinned actions either — pinning without an updater
+# trades a supply-chain risk for a staleness one. Dependabot rewrites the SHA
+# and its trailing version comment together, so the pin stays readable.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip
+    directory: /apps/api
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /apps/whatsapp
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /apps/mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # The three service images, so a base-image CVE surfaces as a pull request
+  # rather than waiting for someone to rebuild.
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/web
+      - /apps/whatsapp
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
