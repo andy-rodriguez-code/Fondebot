@@ -390,8 +390,10 @@ Cloud API, and this project is not affiliated with or endorsed by WhatsApp/Meta.
 
 - **Ports already in use.** Override them inline:
   `API_PORT=8001 WEB_PORT=3001 DB_PORT=5433 make up`.
-- **A service is unhealthy.** Check its logs with `make logs SERVICE=api` (or
-  `web`, `whatsapp`, `db`) and `make ps` for status.
+- **A service is unhealthy.** Open **Settings → Site health** in the app
+  (`/settings/health`) for the readiness check and the native error log, then
+  check its logs with `make logs SERVICE=api` (or `web`, `whatsapp`, `db`) and
+  `make ps` for status.
 - **Session does not persist, or login loops behind HTTPS.** Make sure
   `COOKIE_SECURE=true` is set and you are reaching the app over TLS.
 - **Provider keys or the WhatsApp session stopped decrypting.** The

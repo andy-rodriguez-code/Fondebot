@@ -20,6 +20,9 @@ const en = {
     saveIdentity: "Save identity",
     privateCredentials: "Your keys are safe",
     privateCredentialsCopy: "We store them encrypted and never show them again. Only your agents use them.",
+    healthHeading: "Site health",
+    healthCopy: "Database readiness and the native error log for troubleshooting.",
+    healthCta: "Open site health",
   },
   providers: {
     heading: "AI provider keys",
@@ -57,6 +60,9 @@ const es: typeof en = {
     saveIdentity: "Guardar identidad",
     privateCredentials: "Tus claves están seguras",
     privateCredentialsCopy: "Las guardamos cifradas y no volvemos a mostrarlas. Solo las usan tus agentes.",
+    healthHeading: "Salud del sitio",
+    healthCopy: "Estado de la base de datos y el registro nativo de errores para diagnosticar problemas.",
+    healthCta: "Abrir salud del sitio",
   },
   providers: {
     heading: "Claves de proveedores de IA",

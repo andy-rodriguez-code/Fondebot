@@ -277,6 +277,8 @@ textarea { line-height: 1.55; }
 .data-table td { height: 72px; padding: 11px 18px; color: #50586a; border-bottom: 1px solid #edf0f3; font-size: 14px; }
 .data-table tr:last-child td { border-bottom: 0; }
 .data-table tbody tr:hover { background: #fbfcfe; }
+.data-table td:has(details) { height: auto; }
+.data-table pre { max-width: 480px; max-height: 240px; margin: 8px 0 0; padding: 10px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: #f7f8fa; border-radius: 6px; font-size: 12px; }
 .entity-cell { min-width: 220px; display: flex; align-items: center; gap: 12px; }
 .entity-cell > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .entity-cell strong { color: #202638; font-size: 14px; font-weight: 600; }

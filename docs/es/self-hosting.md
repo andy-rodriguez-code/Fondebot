@@ -409,7 +409,9 @@ WhatsApp ni por Meta.
 
 - **Puertos ocupados.** Sobrescríbelos en la misma línea:
   `API_PORT=8001 WEB_PORT=3001 DB_PORT=5433 make up`.
-- **Un servicio no está sano.** Revisa sus logs con `make logs SERVICE=api` (o
+- **Un servicio no está sano.** Abre **Configuración → Salud del sitio** en la
+  app (`/settings/health`) para ver el chequeo de disponibilidad y el registro
+  nativo de errores; después revisa sus logs con `make logs SERVICE=api` (o
   `web`, `whatsapp`, `db`) y `make ps` para ver el estado.
 - **La sesión no persiste, o el login entra en bucle detrás de HTTPS.** Asegúrate
   de tener `COOKIE_SECURE=true` y de estar llegando a la app por TLS.
