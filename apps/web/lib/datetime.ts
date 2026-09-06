@@ -28,3 +28,19 @@ export function isSameOpenThread(prev: Conversation | null, next: Conversation):
 export function isNearBottom(el: HTMLElement, threshold: number = 150): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
 }
+
+/** Una duración en segundos, en la unidad que la hace legible.
+ *
+ * Se redondea hacia abajo a propósito: la métrica dice cuánto espera la gente
+ * habitualmente, y "2 min" leído como algo menos que dos minutos y medio es
+ * más honesto que redondear hacia arriba y prometer peor de lo que es.
+ */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  if (total < 60) return `${total} s`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
