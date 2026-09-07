@@ -7,6 +7,10 @@ import { apiUrl } from "./api";
 // siempre si el refresco es lo único que la puede corregir y ya no corre.
 export const POLL_WHILE_LIVE_MS = 60000;
 export const POLL_WHILE_OFFLINE_MS = 8000;
+// Cuánto se espera antes de volver a abrir el stream después de un error.
+// EventSource reintenta solo cada ~3 segundos, y contra una sesión que ya
+// terminó eso es un 401 cada tres segundos para siempre.
+export const REOPEN_AFTER_ERROR_MS = 30000;
 
 export function pollIntervalFor(live: boolean): number {
   return live ? POLL_WHILE_LIVE_MS : POLL_WHILE_OFFLINE_MS;
@@ -22,6 +26,9 @@ export function pollIntervalFor(live: boolean): number {
  */
 export function useLiveChanges(slug: string, onChange: () => void): boolean {
   const [live, setLive] = useState(false);
+  // Se incrementa para volver a abrir el stream después de un error. Sin esto
+  // no hay forma de reabrirlo, porque el efecto solo depende del slug.
+  const [attempt, setAttempt] = useState(0);
   // `onChange` se rearma en cada render de la página. Guardarlo en una ref
   // mantiene el efecto atado sólo al slug: sin esto, cada render cerraría y
   // reabriría el stream, que es justo lo que se quería dejar de hacer.
@@ -31,13 +38,24 @@ export function useLiveChanges(slug: string, onChange: () => void): boolean {
   useEffect(() => {
     if (typeof window === "undefined" || typeof EventSource === "undefined") return;
     const source = new EventSource(apiUrl(`/portal/${slug}/events`), { withCredentials: true });
+    let reopen: ReturnType<typeof setTimeout> | undefined;
     source.onopen = () => setLive(true);
     source.addEventListener("conversation", () => handler.current());
-    // EventSource reconecta solo; acá sólo se anota que por ahora no hay
-    // stream, para que el refresco vuelva al ritmo rápido mientras tanto.
-    source.onerror = () => setLive(false);
-    return () => { source.close(); setLive(false); };
-  }, [slug]);
+    source.onerror = () => {
+      setLive(false);
+      // Se cierra en vez de dejar que reintente solo. EventSource no expone el
+      // código de la respuesta, así que no puede distinguir un corte de red de
+      // una sesión terminada: contra la segunda, su reintento automático es un
+      // 401 cada tres segundos, para siempre, y nadie se entera de nada.
+      //
+      // Quien sí puede darse cuenta es el refresco por intervalo, que usa
+      // fetch y ve el 401. Se le deja el trabajo a él, y mientras tanto se
+      // vuelve a intentar mucho más lento.
+      source.close();
+      reopen = setTimeout(() => setAttempt((value) => value + 1), REOPEN_AFTER_ERROR_MS);
+    };
+    return () => { clearTimeout(reopen); source.close(); setLive(false); };
+  }, [slug, attempt]);
 
   return live;
 }

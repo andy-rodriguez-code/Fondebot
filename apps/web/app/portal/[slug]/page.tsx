@@ -55,13 +55,18 @@ export default function PortalPage() {
   useEffect(() => { Promise.all([api<PortalPublic>(`/portal/${slug}`), api<Session>(`/portal/${slug}/me`).catch((err) => { if (err instanceof ApiError && err.status === 401) return null; throw err; })]).then(([info, me]) => { setPortal(info); setSession(me); }).catch((err) => setError(messageFrom(err))).finally(() => setLoading(false)); }, [slug]);
   async function login(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setError(""); const data = new FormData(event.currentTarget); try { setSession(await api<Session>(`/portal/${slug}/login`, { method: "POST", body: JSON.stringify({ email: data.get("email"), password: data.get("password") }) })); } catch (err) { setError(messageFrom(err)); } }
   async function logout() { await api(`/portal/${slug}/logout`, { method: "POST" }); setSession(null); }
+  // La sesión terminó: acá o en otra pestaña, por cerrarla o porque venció. El
+  // portal comprobaba la sesión UNA sola vez, al montar, así que si moría
+  // después la bandeja se quedaba en pantalla con datos viejos y un cartel de
+  // error. Quien se fue seguía viendo las conversaciones de la clientela.
+  const expire = useCallback(() => setSession(null), []);
   if (loading) return <div className="portal-loader"><LoaderCircle className="spin" /> {t("portal.loader.loading")}</div>;
   if (!portal) return <div className="portal-loader">{error || t("portal.loader.unavailable")}</div>;
   if (!session) return <main className="access-page portal-access" style={{ "--portal-color": portal.agency_brand_color } as React.CSSProperties}><header className="access-topbar"><div className="access-brand portal-access-brand">{portal.agency_logo_url ? <img src={`${portal.agency_logo_url}`} alt={portal.agency_name} /> : <span>{portal.agency_name.slice(0, 1)}</span>}<strong>{portal.agency_name}</strong></div><small>{t("portal.access.secureBadge")}</small></header><div className="access-layout"><section className="access-intro"><span className="access-eyebrow">{t("portal.access.eyebrow")}</span><h1>{portal.portal_title}</h1><p>{t("portal.access.intro")}</p><div className="access-preview portal-preview" aria-hidden="true"><header><div><span className="preview-logo"><Inbox size={16} /></span><strong>{t("portal.access.preview.inbox")}</strong></div><small>{t("portal.access.preview.conversationsCount")}</small></header><div className="portal-preview-thread"><div className="active"><span className="preview-icon"><UserRound size={16} /></span><p><strong>{t("portal.access.preview.newInquiry")}</strong><small>{t("portal.access.preview.newInquiryMeta")}</small></p><em>2</em></div><div><span className="preview-icon"><MessageSquareText size={16} /></span><p><strong>{t("portal.access.preview.salesFollowUp")}</strong><small>{t("portal.access.preview.salesFollowUpMeta")}</small></p></div><div><span className="preview-icon"><Building2 size={16} /></span><p><strong>{t("portal.access.preview.servicesInfo")}</strong><small>{t("portal.access.preview.servicesInfoMeta")}</small></p></div></div><footer><span><Bot size={15} /> {t("portal.access.preview.agentReplying")}</span><strong>{t("portal.access.preview.takeControl")}</strong></footer></div></section><section className="access-form-wrap"><form className="access-card access-form" onSubmit={login}><span className="portal-client-avatar">{portal.client_name.slice(0, 2).toUpperCase()}</span><span className="access-card-label"><ShieldCheck size={15} /> {t("portal.access.form.cardLabel")}</span><h2>{t("portal.access.form.welcome", { name: portal.client_name })}</h2><p>{t("portal.access.form.subtitle")}</p><label>{t("portal.access.form.emailLabel")}<input name="email" type="email" required autoFocus placeholder={t("portal.access.form.emailPlaceholder")} /></label><label>{t("portal.access.form.passwordLabel")}<input name="password" type="password" required placeholder={t("portal.access.form.passwordPlaceholder")} /></label>{error && <Alert>{error}</Alert>}<button className="button primary full">{t("portal.access.form.submit")}</button><small className="access-security"><ShieldCheck size={14} /> {t("portal.access.form.security", { name: portal.agency_name })}</small></form></section></div></main>;
-  return <PortalInbox slug={slug} portal={portal} session={session} logout={logout} />;
+  return <PortalInbox slug={slug} portal={portal} session={session} logout={logout} onExpired={expire} />;
 }
 
-function PortalInbox({ slug, portal, session, logout }: { slug: string; portal: PortalPublic; session: Session; logout: () => void }) {
+function PortalInbox({ slug, portal, session, logout, onExpired }: { slug: string; portal: PortalPublic; session: Session; logout: () => void; onExpired: () => void }) {
   const t = useT();
   const { lang } = useLanguage();
   const [items, setItems] = useState<Conversation[]>([]);
@@ -205,14 +210,21 @@ function PortalInbox({ slug, portal, session, logout }: { slug: string; portal: 
     });
   }, [slug, buildParams, markRead, announceAssignments]);
 
-  useEffect(() => { refresh().catch((err) => setError(messageFrom(err))); }, [refresh]);
-  const live = useLiveChanges(slug, useCallback(() => { if (offsetRef.current <= LIMIT) refresh().catch(() => {}); }, [refresh]));
+  // Un 401 no es un error para mostrar en un cartel: es que la sesión se
+  // acabó. Mostrarlo y dejar la bandeja abierta era exactamente el agujero.
+  const onFailure = useCallback((err: unknown) => {
+    if (err instanceof ApiError && err.status === 401) { onExpired(); return; }
+    setError(messageFrom(err));
+  }, [onExpired]);
+
+  useEffect(() => { refresh().catch(onFailure); }, [refresh, onFailure]);
+  const live = useLiveChanges(slug, useCallback(() => { if (offsetRef.current <= LIMIT) refresh().catch(onFailure); }, [refresh, onFailure]));
   useEffect(() => {
     // El refresco no se apaga cuando el stream conecta: se hace lento. Sigue
     // siendo la red que atrapa cualquier aviso que no haya llegado.
-    const id = setInterval(() => { if (offset <= LIMIT) refresh().catch(() => {}); }, pollIntervalFor(live));
+    const id = setInterval(() => { if (offset <= LIMIT) refresh().catch(onFailure); }, pollIntervalFor(live));
     return () => clearInterval(id);
-  }, [refresh, offset, live]);
+  }, [refresh, offset, live, onFailure]);
 
   async function loadMore() {
     if (!hasMore || loadingMore) return;
