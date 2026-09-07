@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import get_settings
 from ..database import new_session
 from .contacts import display_name, phone_from_chat_id, previous_conversation_recap, rename_conversations, resolve_contact
-from .conversation_state import exchanged_only, note_inbound, note_reply
+from .conversation_state import exchanged_only, note_inbound, note_reply, set_mode
 from .departments import client_departments, entry_department, match_choice, menu_options, route, send_menu
 from .error_log import record_error
 from ..models import Agent, Conversation, Message, now_utc
@@ -379,10 +379,30 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
     agent = _answering_agent(conversation, channel)
     credentials = resolve_agent_credentials(db, agent)
     if not agent.is_active or not credentials or not agent.model.strip():
+        # El bot es una opción, no un requisito. El menú de dependencias y el
+        # ruteo funcionan sin IA —son código, no un modelo—, así que cuando el
+        # agente no puede contestar (sin clave, sin modelo, o desactivado) el
+        # caso tiene que pasar a una PERSONA en lugar de quedarse esperando una
+        # respuesta que no va a llegar.
+        #
+        # Antes solo se anotaba el motivo en `channel.last_error`, que vive en
+        # la pantalla del canal en el panel del admin. La conversación se
+        # quedaba en modo "ai", así que en el portal figuraba como atendida por
+        # el bot y la dependencia no se enteraba de nada. Un cliente escribía y
+        # no le contestaba nadie, sin que nadie lo supiera.
         channel.last_error = "A message was received, but the assigned agent is not ready (model or provider key missing)."
         channel.updated_at = now_utc()
+        set_mode(db, conversation, "human", actor="system")
         db.commit()
-        return InboundResult(accepted=True, conversation_id=conversation.id, mode="ai")
+        publish_change(
+            client_id=conversation.client_id,
+            department_id=conversation.department_id,
+            conversation_id=conversation.id,
+        )
+        # El mismo aviso que cuando alguien toma el caso a mano: acá es cuando
+        # tiene que sonar un teléfono, porque no queda nadie más para contestar.
+        await notify_needs_human(db, conversation, retrieval_query)
+        return InboundResult(accepted=True, conversation_id=conversation.id, mode="human")
 
     knowledge = await retrieve_knowledge(db, agent, retrieval_query)
     db.refresh(conversation)

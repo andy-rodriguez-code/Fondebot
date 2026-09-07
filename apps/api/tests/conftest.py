@@ -9,6 +9,12 @@ os.environ["DATABASE_URL"] = os.getenv(
     "TEST_DATABASE_URL",
     "postgresql+psycopg://openlivery:openlivery@localhost:5432/openlivery_test",
 )
+# Asignado a la fuerza y no con setdefault, igual que DATABASE_URL: la suite
+# afirma el comportamiento por defecto ("sin proveedor no se manda nada"), asi
+# que una instalacion con SMTP configurado la hacia fallar en quince tests que
+# no tenian nada que ver con el correo. Un test no puede depender de lo que el
+# deployment tenga puesto, y menos mandar correo de verdad al correrse.
+os.environ["EMAIL_PROVIDER"] = "none"
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("REPLY_DEBOUNCE_SECONDS", "0")
 # get_settings() refuses to start on the placeholder secrets published in the
