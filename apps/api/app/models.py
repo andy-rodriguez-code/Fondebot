@@ -573,6 +573,13 @@ class PortalUser(Base):
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # La foto de quien atiende, con el mismo patron que el logo de cliente: los
+    # bytes en Postgres, deferred para no arrastrarlos en cada consulta. Se usa
+    # para que en el hilo se vea QUIEN contesto — la persona con su cara, el
+    # bot con su icono.
+    avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    avatar_mime: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
