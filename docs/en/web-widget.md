@@ -22,7 +22,7 @@ The snippet points `data-agent` at the agent's public id and passes the appearan
 <script
   src="https://your-openlivery-domain/widget.js"
   data-agent="AGENT_PUBLIC_ID"
-  data-color="#075985"
+  data-color="#01509C"
   data-position="right"
   async
 ></script>
