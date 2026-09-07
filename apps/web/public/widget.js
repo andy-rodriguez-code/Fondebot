@@ -4,7 +4,7 @@
   var agent = script.getAttribute("data-agent");
   if (!agent) return;
   var origin = new URL(script.src).origin;
-  var color = script.getAttribute("data-color") || "#635bff";
+  var color = script.getAttribute("data-color") || "#01509C";
   var side = script.getAttribute("data-position") === "left" ? "left" : "right";
   var open = false;
   var teaserShown = false;

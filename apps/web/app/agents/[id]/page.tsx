@@ -38,7 +38,7 @@ export default function AgentDetailPage() {
   const [audioModel, setAudioModel] = useState("whisper-1");
   const [widgetEnabled, setWidgetEnabled] = useState(false);
   const [widgetGreeting, setWidgetGreeting] = useState("");
-  const [widgetColor, setWidgetColor] = useState("#075985");
+  const [widgetColor, setWidgetColor] = useState("#01509C");
   const [widgetPosition, setWidgetPosition] = useState("right");
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [qaPairs, setQaPairs] = useState<QAPair[]>([]);
@@ -55,7 +55,7 @@ export default function AgentDetailPage() {
     setImageEnabled(a.image_enabled); setImageModel(a.image_model || "gpt-4.1");
     setAudioEnabled(a.audio_enabled); setAudioModel(a.audio_model || "whisper-1");
     setWidgetEnabled(a.widget_enabled); setWidgetGreeting(a.widget_greeting);
-    setWidgetColor(a.widget_color || "#075985"); setWidgetPosition(a.widget_position || "right");
+    setWidgetColor(a.widget_color || "#01509C"); setWidgetPosition(a.widget_position || "right");
   };
 
   const contextWindow = modelContextWindow(model);

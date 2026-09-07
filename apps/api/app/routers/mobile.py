@@ -92,7 +92,7 @@ def _branding(client: Client, agency: Agency) -> MobileBranding:
         agency_name=agency.name,
         client_name=client.name,
         portal_title=client.portal_title or f"{client.name} Inbox",
-        brand_color=agency.brand_color or "#075985",
+        brand_color=agency.brand_color or "#01509C",
         agency_logo_url=f"/api/portal/{slug}/logo" if agency.logo_data else None,
         client_logo_url=f"/api/portal/{slug}/client-logo" if client.logo_mime else None,
     )

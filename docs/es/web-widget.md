@@ -22,7 +22,7 @@ El fragmento apunta `data-agent` al id público del agente y pasa las opciones d
 <script
   src="https://your-openlivery-domain/widget.js"
   data-agent="AGENT_PUBLIC_ID"
-  data-color="#075985"
+  data-color="#01509C"
   data-position="right"
   async
 ></script>
