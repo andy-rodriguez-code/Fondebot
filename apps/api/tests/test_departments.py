@@ -535,3 +535,31 @@ def test_naming_a_department_in_a_sentence_does_not_route(authenticated_client: 
 
     _post_signed(client, setup["channel"]["id"], [_text("no quiero nada con contabilidad", "wamid.2")])
     assert _conversation(client)["department_id"] == setup["departments"]["Recepción"]["id"]
+
+
+# --- El bot es una opcion, no un requisito ----------------------------------
+
+
+def test_without_a_usable_agent_the_case_goes_to_a_person(authenticated_client: TestClient, monkeypatch):
+    """Lo que pasa cuando no hay clave de proveedor cargada.
+
+    El menu de dependencias y el ruteo no necesitan IA: son codigo. Pero si el
+    agente de la dependencia no puede contestar, el caso tiene que pasar a una
+    persona. Antes se quedaba en modo "ai" y el motivo solo figuraba en la
+    pantalla del canal, en el panel del admin: en el portal aparecia como
+    atendida por el bot, la dependencia no se enteraba, y quien escribio no
+    recibia respuesta de nadie.
+    """
+    client = authenticated_client
+    setup = _setup(client)
+    _quiet_channel(monkeypatch)
+    # Sin modelo, el agente no puede contestar aunque haya credenciales.
+    agent_id = setup["agents"]["Recepcion"]["id"]
+    assert client.patch(f"/api/agents/{agent_id}", json={"model": ""}).status_code == 200
+
+    _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
+    _post_signed(client, setup["channel"]["id"], [_text("necesito ayuda", "wamid.2")])
+
+    conversation = _conversation(client)
+    assert conversation["mode"] == "human", "el caso tiene que quedar esperando a una persona"
+    assert conversation["status"] == "open"
