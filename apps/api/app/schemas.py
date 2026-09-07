@@ -390,6 +390,12 @@ class MessageOut(ORMModel):
     quoted_message_id: uuid.UUID | None = None
     created_at: datetime
     attachments: list[AttachmentOut] = []
+    # Quien escribio, resuelto del lado del servidor. Va en el mensaje y no se
+    # deduce en la interfaz a partir de la lista de miembros: quien supervisa ve
+    # conversaciones de dependencias a las que no pertenece, asi que esa lista
+    # no siempre contiene al autor.
+    sender_avatar_url: str | None = None
+    sender_department: str | None = None
 
 
 class ConversationDetail(ConversationOut):
@@ -433,6 +439,8 @@ class PortalMemberOut(BaseModel):
     id: uuid.UUID
     name: str
     email: str
+    avatar_url: str | None = None
+    department_name: str | None = None
 
 
 class PortalChannelOut(BaseModel):
@@ -542,6 +550,9 @@ class PortalSessionOut(BaseModel):
     # The person behind the session; absent on sessions that predate portal users.
     user_id: uuid.UUID | None = None
     user_name: str | None = None
+    user_email: str | None = None
+    department_name: str | None = None
+    avatar_url: str | None = None
 
 
 class InvitationOut(BaseModel):
@@ -741,3 +752,16 @@ class ErrorEventOut(ORMModel):
     request_path: str | None
     subject_ref: str | None
     is_global: bool = False
+
+
+class PortalProfileUpdate(BaseModel):
+    """Lo que una persona del portal puede cambiar de si misma.
+
+    Solo su nombre, su direccion y su clave. La dependencia NO esta aca a
+    proposito: cambiarsela seria elegir que conversaciones ve, y eso lo decide
+    quien administra, no quien atiende.
+    """
+
+    name: str | None = Field(default=None, max_length=160)
+    email: EmailStr | None = None
+    password: Password | None = None

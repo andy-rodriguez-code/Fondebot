@@ -30,6 +30,7 @@ from ..schemas import (
     PortalLoginRequest,
     PortalMemberOut,
     PortalPublicOut,
+    PortalProfileUpdate,
     PortalSessionOut,
     SendMessageRequest,
 )
@@ -53,6 +54,10 @@ from ..services.operator_media import store_operator_media_reply
 from ..services.realtime import publish as publish_change, stream as realtime_stream
 from ..services.whatsapp import send_channel_message
 
+
+# Tope de la foto de perfil. Una cara no necesita mas, y estos bytes viven en
+# Postgres: sin tope, una sola persona puede inflar la tabla sin querer.
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 router = APIRouter(prefix="/portal", tags=["Client portal"])
 
@@ -145,15 +150,67 @@ def _window_fields(conversation: Conversation, last_inbound_at) -> dict:
     return {"reply_window_until": window_open_until(last_inbound_at), "reply_window_open": window_is_open(last_inbound_at)}
 
 
-def _present(conversation: Conversation) -> ConversationDetail:
+def _present(conversation: Conversation, db: Session | None = None) -> ConversationDetail:
     assignee = conversation.assignee
-    return ConversationDetail.model_validate(conversation).model_copy(
+    detail = ConversationDetail.model_validate(conversation).model_copy(
         update={
             "assignee_name": (assignee.name.strip() or assignee.email) if assignee else None,
             "department_name": conversation.department.name if conversation.department else None,
             **_window_fields(conversation, _last_inbound_at(conversation)),
         }
     )
+    # Quién contestó, mensaje por mensaje: la cara de la persona cuando
+    # respondió un humano, nada cuando respondió el agente — ahí la interfaz
+    # pone el ícono del robot. Sin esto un hilo muestra un nombre y ya, y una
+    # respuesta del bot y una de una persona se ven igual.
+    if db is not None and detail.messages:
+        authors = _author_fields(db, conversation.messages)
+        detail = detail.model_copy(
+            update={
+                "messages": [
+                    message.model_copy(update=authors[original.portal_user_id])
+                    if original.portal_user_id in authors
+                    else message
+                    for message, original in zip(detail.messages, conversation.messages)
+                ]
+            }
+        )
+    return detail
+
+
+def _avatar_url(person: PortalUser | None) -> str | None:
+    """La URL de la foto, o None si no cargó ninguna.
+
+    Lleva el id de la persona y no un timestamp: la foto se sirve con
+    ``Cache-Control: private`` corto, así que cambiarla se ve sin trucos de
+    invalidación.
+    """
+    if not person or not person.avatar_mime:
+        return None
+    return f"/api/portal/{person.client.portal_slug}/members/{person.id}/avatar"
+
+
+def _author_fields(db: Session, messages) -> dict:
+    """Quién escribió cada mensaje: su foto y su dependencia.
+
+    Se resuelve del lado del servidor y viaja en el mensaje. Deducirlo en la
+    interfaz desde la lista de miembros no alcanza: quien supervisa ve
+    conversaciones de dependencias a las que no pertenece, y esa lista solo
+    trae a su propia gente.
+
+    Una sola consulta para todo el hilo, no una por mensaje.
+    """
+    ids = {m.portal_user_id for m in messages if m.portal_user_id}
+    if not ids:
+        return {}
+    people = db.scalars(select(PortalUser).where(PortalUser.id.in_(ids))).all()
+    return {
+        person.id: {
+            "sender_avatar_url": _avatar_url(person),
+            "sender_department": person.department.name if person.department else None,
+        }
+        for person in people
+    }
 
 
 def _visible(user: PortalUser | None):
@@ -386,6 +443,9 @@ def portal_me(
         "agency_name": agency.name,
         "user_id": user.id if user else None,
         "user_name": (user.name.strip() or user.email) if user else None,
+        "user_email": user.email if user else None,
+        "department_name": user.department.name if user and user.department else None,
+        "avatar_url": _avatar_url(user),
     }
 
 
@@ -406,7 +466,16 @@ def portal_members(
     if user and user.department_id:
         query = query.where(PortalUser.department_id == user.department_id)
     rows = db.scalars(query.order_by(PortalUser.name, PortalUser.email)).all()
-    return [{"id": row.id, "name": row.name.strip() or row.email, "email": row.email} for row in rows]
+    return [
+        {
+            "id": row.id,
+            "name": row.name.strip() or row.email,
+            "email": row.email,
+            "avatar_url": _avatar_url(row),
+            "department_name": row.department.name if row.department else None,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/{slug}/agents", response_model=list[AgentSummary])
@@ -874,7 +943,7 @@ async def portal_start_conversation(
     note_reply(conversation)
     conversation.updated_at = now_utc()
     db.commit()
-    return _present(_detail(db, client, conversation.id, user))
+    return _present(_detail(db, client, conversation.id, user), db)
 
 
 @router.post("/{slug}/conversations/{conversation_id}/reply-template", response_model=ConversationDetail)
@@ -910,7 +979,7 @@ async def portal_reply_template(
     db.commit()
     changed = _detail(db, client, conversation_id, user)
     _publish_change(changed)
-    return _present(changed)
+    return _present(changed, db)
 
 
 @router.get("/{slug}/conversations/summary", response_model=PortalInboxSummary)
@@ -960,7 +1029,7 @@ def portal_conversation(
     user: PortalUser | None = Depends(_portal_user),
     db: Session = Depends(get_db),
 ):
-    return _present(_detail(db, client, conversation_id, user))
+    return _present(_detail(db, client, conversation_id, user), db)
 
 
 @router.patch("/{slug}/conversations/{conversation_id}/mode", response_model=ConversationDetail)
@@ -982,7 +1051,7 @@ def portal_mode(
         db.commit()
     changed = _detail(db, client, conversation_id, user)
     _publish_change(changed)
-    return _present(changed)
+    return _present(changed, db)
 
 
 @router.post("/{slug}/conversations/{conversation_id}/assignment", response_model=ConversationDetail)
@@ -1020,7 +1089,7 @@ async def portal_assign(
             await notify_assigned(db, conversation, assignee, sender_name)
     changed = _detail(db, client, conversation_id, user)
     _publish_change(changed)
-    return _present(changed)
+    return _present(changed, db)
 
 
 @router.patch("/{slug}/conversations/{conversation_id}/status", response_model=ConversationDetail)
@@ -1042,7 +1111,7 @@ def portal_status(
         db.commit()
     changed = _detail(db, client, conversation_id, user)
     _publish_change(changed)
-    return _present(changed)
+    return _present(changed, db)
 
 
 @router.get("/{slug}/conversations/{conversation_id}/attachments/{attachment_id}")
@@ -1078,7 +1147,7 @@ async def portal_reply_media(
     )
     changed = _detail(db, client, conversation_id, user)
     _publish_change(changed)
-    return _present(changed)
+    return _present(changed, db)
 
 
 @router.post("/{slug}/conversations/{conversation_id}/reply", response_model=ConversationDetail)
@@ -1112,7 +1181,7 @@ async def portal_reply(
     db.commit()
     changed = _detail(db, client, conversation_id, user)
     _publish_change(changed)
-    return _present(changed)
+    return _present(changed, db)
 
 
 @router.get("/{slug}/events")
@@ -1146,3 +1215,126 @@ def portal_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# --- Perfil de quien atiende ------------------------------------------------
+#
+# Una persona del portal puede cambiar su nombre, su direccion y su clave, y
+# subir una foto. NO puede cambiarse la dependencia: eso decidiria que
+# conversaciones ve, y esa decision es de quien administra.
+
+
+@router.patch("/{slug}/me", response_model=PortalSessionOut)
+def portal_update_me(
+    slug: str,
+    payload: PortalProfileUpdate,
+    client: Client = Depends(_portal_client),
+    user: PortalUser | None = Depends(_portal_user),
+    db: Session = Depends(get_db),
+):
+    if not user:
+        raise HTTPException(status_code=403, detail="This session has no person attached")
+    values = payload.model_dump(exclude_unset=True)
+    if "name" in values and values["name"] is not None:
+        user.name = values["name"].strip()
+    if values.get("email"):
+        email = str(values["email"]).lower()
+        clash = db.scalar(
+            select(PortalUser).where(
+                PortalUser.client_id == client.id, PortalUser.email == email, PortalUser.id != user.id
+            )
+        )
+        if clash:
+            raise HTTPException(status_code=409, detail="That e-mail is already on this portal")
+        user.email = email
+    if values.get("password"):
+        user.password_hash = hash_password(values["password"])
+    db.commit()
+    db.refresh(user)
+    agency = db.get(Agency, client.agency_id)
+    return {
+        "client_id": client.id,
+        "client_name": client.name,
+        "portal_slug": client.portal_slug,
+        "agency_name": agency.name,
+        "user_id": user.id,
+        "user_name": user.name.strip() or user.email,
+        "user_email": user.email,
+        "department_name": user.department.name if user.department else None,
+        "avatar_url": _avatar_url(user),
+    }
+
+
+@router.put("/{slug}/me/avatar", response_model=PortalSessionOut)
+async def portal_set_avatar(
+    slug: str,
+    file: UploadFile = File(...),
+    client: Client = Depends(_portal_client),
+    user: PortalUser | None = Depends(_portal_user),
+    db: Session = Depends(get_db),
+):
+    if not user:
+        raise HTTPException(status_code=403, detail="This session has no person attached")
+    mime = (file.content_type or "").lower()
+    # Solo imagenes de mapa de bits. SVG queda afuera a proposito: puede traer
+    # scripts, y aunque se sirva con nosniff y CSP, una cara no necesita ser un
+    # documento ejecutable.
+    if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+        raise HTTPException(status_code=415, detail="The photo must be a PNG, JPEG, WEBP or GIF image")
+    data = await file.read(MAX_AVATAR_BYTES + 1)
+    if len(data) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=413, detail="The photo is too large")
+    if not data:
+        raise HTTPException(status_code=422, detail="The photo is empty")
+    user.avatar_data = data
+    user.avatar_mime = mime
+    db.commit()
+    db.refresh(user)
+    agency = db.get(Agency, client.agency_id)
+    return {
+        "client_id": client.id,
+        "client_name": client.name,
+        "portal_slug": client.portal_slug,
+        "agency_name": agency.name,
+        "user_id": user.id,
+        "user_name": user.name.strip() or user.email,
+        "user_email": user.email,
+        "department_name": user.department.name if user.department else None,
+        "avatar_url": _avatar_url(user),
+    }
+
+
+@router.delete("/{slug}/me/avatar", status_code=status.HTTP_204_NO_CONTENT)
+def portal_delete_avatar(
+    slug: str,
+    client: Client = Depends(_portal_client),
+    user: PortalUser | None = Depends(_portal_user),
+    db: Session = Depends(get_db),
+):
+    if not user:
+        raise HTTPException(status_code=403, detail="This session has no person attached")
+    user.avatar_data = None
+    user.avatar_mime = None
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{slug}/members/{member_id}/avatar")
+def portal_member_avatar(
+    slug: str,
+    member_id: uuid.UUID,
+    client: Client = Depends(_portal_client),
+    user: PortalUser | None = Depends(_portal_user),
+    db: Session = Depends(get_db),
+):
+    """La foto de quien contesto, para el hilo.
+
+    Alcanza con pertenecer al mismo cliente: un hilo puede traer mensajes de
+    alguien de otra dependencia — un caso ruteado, por ejemplo — y esconder esa
+    cara dejaria el mensaje sin autor sin ganar nada. Lo que la dependencia
+    separa son las CONVERSACIONES, no quien trabaja en el negocio.
+    """
+    person = db.scalar(select(PortalUser).where(PortalUser.id == member_id, PortalUser.client_id == client.id))
+    if not person or not person.avatar_data or not person.avatar_mime:
+        raise HTTPException(status_code=404, detail="No photo")
+    return logo_response(person.avatar_data, person.avatar_mime)
