@@ -2,15 +2,49 @@ import { timingSafeEqual } from "node:crypto";
 const backendUrl = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/$/, "");
 export const bridgeToken = process.env.WHATSAPP_BRIDGE_TOKEN || "dev-local-change-this-bridge-token";
 
+/** Cuantas veces se intenta antes de rendirse, y cuanto se espera entre una y
+ * otra. Acotado a proposito: esto no es para aguantar una caida larga, es para
+ * cruzar un redespliegue de unos segundos. */
+export const ATTEMPTS = 3;
+const BACKOFF_MS = [250, 1000];
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function backend<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${backendUrl}/api/internal/whatsapp${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Bridge-Token": bridgeToken,
-      ...options.headers,
-    },
-  });
+  const send = () =>
+    fetch(`${backendUrl}/api/internal/whatsapp${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Bridge-Token": bridgeToken,
+        ...options.headers,
+      },
+    });
+
+  // Se reintenta solo un fallo de RED, nunca una respuesta HTTP: un 4xx no
+  // mejora por insistir, y reintentarlo duplicaria mensajes.
+  //
+  // El caso real que esto arregla: la API se redespliega, el contenedor nuevo
+  // tiene otra IP, y las conexiones que este proceso tenia guardadas apuntan a
+  // un socket muerto. La primera reutilizacion lanza "fetch failed" y una
+  // conexion nueva anda perfecto.
+  //
+  // Sin esto el puente queda MUDO hasta que alguien lo reinicia a mano, y nadie
+  // se entera: los mensajes de WhatsApp simplemente dejan de llegar. Se
+  // encontro asi, con el puente vivo y la API sana, fallando cada pocos
+  // segundos por conexiones que ya no existian.
+  let response: Response | undefined;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    try {
+      response = await send();
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt < ATTEMPTS - 1) await wait(BACKOFF_MS[attempt] ?? 1000);
+    }
+  }
+  if (!response) throw lastError instanceof Error ? lastError : new Error("The backend could not be reached");
   if (!response.ok) {
     let detail = `FastAPI responded with ${response.status}`;
     try {
