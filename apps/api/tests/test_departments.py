@@ -5,6 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from app.database import SessionLocal
+from app.models import Conversation
 
 from app.routers import whatsapp_cloud_webhook as webhook_router
 from app.services import ai as ai_service
@@ -441,3 +445,93 @@ def test_members_and_assignment_stay_inside_the_department(authenticated_client:
         f"/api/portal/{slug}/conversations/{conversation_id}/assignment", json={"assignee_id": accounting_id}
     )
     assert handed_away.status_code == 404
+
+
+# --- Conversaciones anteriores a las dependencias ---------------------------
+#
+# Estado real encontrado en una instalacion: un caso abierto ANTES de que el
+# cliente cargara sus dependencias queda con `department_id` nulo. Eso no es un
+# estado neutro, y rompe dos cosas a la vez.
+
+
+def _orphan_the_conversation() -> None:
+    """Deja el caso sin dependencia, como quedan los anteriores a la funcion."""
+    with SessionLocal() as db:
+        row = db.scalars(select(Conversation)).one()
+        row.department_id = None
+        db.commit()
+
+
+def test_a_conversation_without_a_department_adopts_reception(authenticated_client: TestClient, monkeypatch):
+    """Sin esto el caso es invisible para todo el mundo.
+
+    ``_visible`` filtra por igualdad, y un nulo no coincide con ninguna
+    dependencia: quien pertenece a una no ve el caso, asi que nadie lo puede
+    contestar desde el portal. No es que falte un permiso — no aparece.
+    """
+    client = authenticated_client
+    setup = _setup(client)
+    _quiet_channel(monkeypatch)
+    _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
+    _orphan_the_conversation()
+
+    _post_signed(client, setup["channel"]["id"], [_text("sigo ahi?", "wamid.2")])
+
+    conversation = _conversation(client)
+    assert conversation["department_id"] == setup["departments"]["Recepción"]["id"]
+    assert conversation["agent_id"] == setup["agents"]["Recepcion"]["id"]
+
+
+def test_choosing_from_the_menu_works_without_a_department(authenticated_client: TestClient, monkeypatch):
+    """El sintoma que se ve desde afuera: elegir no hacia nada.
+
+    El texto solo contaba como eleccion estando en recepcion, y un caso sin
+    dependencia no estaba en recepcion. Recibia el menu, el contacto escribia
+    "3", y le contestaba la IA como si nada. Para siempre.
+    """
+    client = authenticated_client
+    setup = _setup(client)
+    _quiet_channel(monkeypatch)
+    _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
+    _orphan_the_conversation()
+
+    _post_signed(client, setup["channel"]["id"], [_text("3", "wamid.2")])
+
+    assert _conversation(client)["department_id"] == setup["departments"]["Contabilidad"]["id"]
+
+
+# Un caso por test y no dos mensajes en el mismo: el canal de prueba devuelve
+# siempre el mismo id de mensaje saliente, y dos respuestas en una conversacion
+# chocan contra `uq_messages_conversation_external`.
+
+
+def test_a_number_outside_the_menu_does_not_route(authenticated_client: TestClient, monkeypatch):
+    """Lo que NO tiene que pasar: entrar a cualquier lado.
+
+    Que un caso sin dependencia pueda elegir no significa que cualquier cosa
+    sirva. Fuera del menu se queda en recepcion.
+    """
+    client = authenticated_client
+    setup = _setup(client)
+    _quiet_channel(monkeypatch)
+    _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
+    _orphan_the_conversation()
+
+    _post_signed(client, setup["channel"]["id"], [_text("9", "wamid.2")])
+    assert _conversation(client)["department_id"] == setup["departments"]["Recepción"]["id"]
+
+
+def test_naming_a_department_in_a_sentence_does_not_route(authenticated_client: TestClient, monkeypatch):
+    """Nombrar una dependencia al pasar no es elegirla.
+
+    La coincidencia es exacta a proposito, y eso tiene que seguir valiendo
+    tambien para un caso que llego sin dependencia.
+    """
+    client = authenticated_client
+    setup = _setup(client)
+    _quiet_channel(monkeypatch)
+    _post_signed(client, setup["channel"]["id"], [_text("Hola", "wamid.1")])
+    _orphan_the_conversation()
+
+    _post_signed(client, setup["channel"]["id"], [_text("no quiero nada con contabilidad", "wamid.2")])
+    assert _conversation(client)["department_id"] == setup["departments"]["Recepción"]["id"]

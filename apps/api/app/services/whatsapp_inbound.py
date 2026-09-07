@@ -195,6 +195,20 @@ async def process_inbound(
             contact.name = inbound.sender_name.strip()[:180]
             rename_conversations(db, contact)
 
+    # Una conversacion abierta ANTES de que el cliente tuviera dependencias no
+    # esta en ninguna, y eso no es un estado neutro: `_visible` filtra por
+    # igualdad, y un nulo no coincide con ninguna dependencia, asi que el caso
+    # queda invisible para toda persona que pertenezca a una. Nadie lo ve, nadie
+    # lo puede contestar. Se adopta recepcion en cuanto llega el proximo
+    # mensaje, que es cuando el caso vuelve a estar vivo.
+    #
+    # No se toca `assignee_id`: acá no se mueve el caso de equipo como en
+    # `route()`, se completa un dato que faltaba. Sacarle el caso a quien ya lo
+    # tenia seria peor que el problema que se esta arreglando.
+    if conversation.department_id is None and entry is not None:
+        conversation.department_id = entry.id
+        conversation.agent_id = entry.agent_id
+
     display_content, llm_content = await resolve_inbound_content(db, _answering_agent(conversation, channel), inbound)
     visitor_message = Message(
         conversation_id=conversation.id,
@@ -238,7 +252,14 @@ async def process_inbound(
         # recepción. Después, un "2" es parte de la charla con su dependencia y
         # no un cambio de área. El botón vale siempre: ahí la intención es
         # explícita, y es la forma de volver al menú.
-        in_entry = entry is not None and conversation.department_id == entry.id
+        # Estar sin dependencia tambien cuenta como seguir en recepcion. Sin
+        # esto, una conversacion que no llego a tener una recibe el menu y
+        # despues elegir no le hace absolutamente nada: el texto entra vacio y
+        # nunca coincide con una opcion. El contacto escribe "1" y le contesta
+        # la IA como si nada, para siempre.
+        in_entry = conversation.department_id is None or (
+            entry is not None and conversation.department_id == entry.id
+        )
         chosen = match_choice(
             options,
             text=display_content if in_entry else "",
