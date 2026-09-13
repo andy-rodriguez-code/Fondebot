@@ -7,7 +7,7 @@ pydantic-settings==2.10.1
 python-multipart==0.0.30
 PyJWT==2.13.0
 bcrypt==5.0.0
-cryptography==50.0.0
+cryptography==50.0.1
 pypdf==6.16.2
 httpx==0.28.1
 mcp==1.28.1
