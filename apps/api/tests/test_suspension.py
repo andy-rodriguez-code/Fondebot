@@ -202,3 +202,42 @@ class TestElWebhookDeMetaDescarta:
 
         assert response.status_code == 403
 
+
+class TestLaAppMobileSeCierra:
+    """La cuarta puerta. Tiene su propio login y NO pasa por la dependencia del
+    portal, así que cerrar el portal web no la cierra."""
+
+    def test_el_login_mobile_se_rechaza(self, authenticated_client: TestClient):
+        customer = _empresa_con_portal(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+
+        telefono = TestClient(authenticated_client.app)
+        response = telefono.post(
+            "/api/mobile/sign-in",
+            json={"email": "ada@panaderia.com", "password": PASSWORD},
+        )
+
+        assert response.status_code == 401
+
+    def test_una_sesion_mobile_ya_abierta_deja_de_servir(self, authenticated_client: TestClient):
+        # El caso real: alguien con la app abierta cuando se corta el servicio.
+        # La sesión se abre ANTES de suspender, y el token se reusa contra una
+        # ruta autenticada: eso es lo que prueba que la sesión, y no solo el
+        # login, deje de servir.
+        customer = _empresa_con_portal(authenticated_client)
+        telefono = TestClient(authenticated_client.app)
+        session = telefono.post(
+            "/api/mobile/sign-in",
+            json={"email": "ada@panaderia.com", "password": PASSWORD},
+        )
+        assert session.status_code == 200
+        token = session.json()["token"]
+
+        _suspender(authenticated_client, customer["id"])
+
+        response = telefono.get(
+            "/api/mobile/session",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 401
+

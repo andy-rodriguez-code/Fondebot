@@ -130,7 +130,11 @@ def mobile_sign_in(payload: MobileSignInRequest, db: Session = Depends(get_db)):
         if not verify_password(payload.password, user.password_hash):
             continue
         client = db.get(Client, user.client_id)
-        if not client or not client.portal_enabled:
+        # La suspensión se trata igual que un portal cerrado: se descarta este
+        # candidato y se sigue buscando. El 401 final no dice por qué, y eso es
+        # deliberado — esta respuesta ya está escrita para no revelar si una
+        # dirección existe (ver el docstring de esta función).
+        if not client or not client.portal_enabled or not client.is_active:
             continue
         agency = db.get(Agency, client.agency_id)
         if agency:
@@ -154,7 +158,11 @@ def _resolve(db: Session, authorization: str | None) -> tuple[Client, Agency, Po
         client_id = uuid.UUID(payload["sub"])
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=401, detail="Invalid session") from exc
-    client = db.scalar(select(Client).where(Client.id == client_id, Client.portal_enabled.is_(True)))
+    client = db.scalar(
+        select(Client).where(
+            Client.id == client_id, Client.portal_enabled.is_(True), Client.is_active.is_(True)
+        )
+    )
     if not client or client.portal_slug != payload.get("portal_slug"):
         raise HTTPException(status_code=401, detail="This portal is no longer available")
     agency = db.get(Agency, client.agency_id)
