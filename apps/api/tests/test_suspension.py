@@ -9,7 +9,12 @@ entra una petición de afuera —portal, widget, WhatsApp y mobile—, que no se
 borre nada, y que el corte sea para la empresa y no para quien la administra.
 """
 
+import json
+
 from fastapi.testclient import TestClient
+
+from app.config import get_settings
+from test_whatsapp_cloud import APP_SECRET, _setup_channel, _sign, _webhook_payload
 
 PASSWORD = "una-clave-de-prueba-larga"
 
@@ -109,4 +114,91 @@ class TestElWidgetDejaDeAtender:
         _suspender(authenticated_client, customer["id"])
 
         assert visitante.get(f"/api/widget/{public_id}").status_code == 404
+
+
+class TestWhatsappDejaDeContestar:
+    """El canal que de verdad cuesta plata cuando no se corta."""
+
+    def test_el_mensaje_entrante_se_rechaza(self, authenticated_client: TestClient):
+        customer = _empresa_con_portal(authenticated_client)
+        agent = authenticated_client.post(
+            "/api/agents",
+            json={
+                "client_id": customer["id"],
+                "name": "Bot Panaderia",
+                "instructions": "Atende pedidos.",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+            },
+        ).json()
+        channel = authenticated_client.put(
+            f"/api/whatsapp/channels/{customer['id']}",
+            json={"agent_id": agent["id"]},
+        ).json()
+
+        _suspender(authenticated_client, customer["id"])
+
+        puente = TestClient(authenticated_client.app)
+        response = puente.post(
+            f"/api/internal/whatsapp/channels/{channel['id']}/inbound",
+            json={
+                "external_message_id": "m1",
+                "remote_jid": "5491100000000@s.whatsapp.net",
+                "sender_name": "Cliente",
+                "text": "hola",
+            },
+            headers={"X-Bridge-Token": get_settings().whatsapp_bridge_token},
+        )
+
+        assert response.status_code == 409
+        assert "suspend" in response.json()["detail"].lower()
+
+
+class TestElWebhookDeMetaDescarta:
+    """El canal de las empresas grandes. Se responde 200 y se descarta, y NO se
+    rechaza: Meta reintenta todo lo que no sea 2xx, así que un 403 convertiría a
+    una empresa suspendida en tráfico infinito contra el servidor."""
+
+    def test_responde_200_y_no_procesa(self, authenticated_client: TestClient):
+        customer, agent, channel = _setup_channel(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+
+        payload = _webhook_payload(
+            [{"from": "5730011", "id": "wamid.suspendida", "type": "text", "text": {"body": "hola"}}]
+        )
+        raw = json.dumps(payload).encode()
+
+        meta = TestClient(authenticated_client.app)
+        response = meta.post(
+            f"/api/public/whatsapp-cloud/channels/{channel['id']}/webhook",
+            content=raw,
+            headers={"Content-Type": "application/json", "X-Hub-Signature-256": _sign(raw, APP_SECRET)},
+        )
+
+        assert response.status_code == 200
+
+        # Y lo que de verdad importa: no se creó ninguna conversación.
+        conversaciones = authenticated_client.get("/api/conversations/inbox").json()
+        assert conversaciones == []
+
+    def test_una_firma_invalida_sigue_dando_403(self, authenticated_client: TestClient):
+        # El control de suspensión va DESPUÉS de la firma. Si se adelantara, le
+        # daría a cualquiera una forma de averiguar qué canales existen y cuáles
+        # están suspendidos, sin credencial alguna.
+        customer, agent, channel = _setup_channel(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+
+        payload = _webhook_payload(
+            [{"from": "5730011", "id": "wamid.falsa", "type": "text", "text": {"body": "hola"}}]
+        )
+        raw = json.dumps(payload).encode()
+
+        meta = TestClient(authenticated_client.app)
+        response = meta.post(
+            f"/api/public/whatsapp-cloud/channels/{channel['id']}/webhook",
+            content=raw,
+            headers={"Content-Type": "application/json", "X-Hub-Signature-256": _sign(raw, "secreto-equivocado")},
+        )
+
+        assert response.status_code == 403
 

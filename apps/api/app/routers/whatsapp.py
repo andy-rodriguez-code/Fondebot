@@ -216,6 +216,12 @@ async def inbound_message(channel_id: uuid.UUID, payload: WhatsAppInbound, db: S
     channel = _internal_channel(db, channel_id)
     if not channel.is_enabled:
         raise HTTPException(status_code=409, detail="The channel is disconnected")
+    # 409 y no 403 para que el puente lo trate como lo que es: una condición
+    # del canal, igual que estar desconectado. Ya sabe no reintentar ante un
+    # 409. `_internal_channel` trae al cliente con joinedload (línea 74), así
+    # que esto no agrega una consulta.
+    if not channel.agent.client.is_active:
+        raise HTTPException(status_code=409, detail="This company is suspended")
 
     media_bytes = None
     if payload.media_base64:
