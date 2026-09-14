@@ -50,6 +50,41 @@ del job `web` y `apps/web/Dockerfile:5`.
 | 4 | `npm test` | **11 archivos, 63 tests, todos en verde** |
 | 5 | `npm run build` | **código 0** |
 
+## El CI real, sobre el PR #88
+
+Lo de arriba es local, en Windows. Esto es el runner de GitHub, en Ubuntu, que
+es lo que decide. Corrida `34792352566`, **los 7 jobs en verde**:
+
+| Job | Resultado |
+|---|---|
+| `web (lint + types + tests + build)` | pass · 57s |
+| `api (pytest + migrations)` | pass · 2m52s |
+| `whatsapp (tests + build)` | pass · 13s |
+| `mobile (types)` | pass · 25s |
+| `stack (compose boots and stays hardened)` | pass · 1m26s |
+| `dependency scan` | pass · 23s |
+| `guard (no internal content)` | pass · 5s |
+
+Dos cosas que solo se podían comprobar acá:
+
+1. **Los globs funcionan en Linux.** El log del job `web` muestra los dos
+   proyectos y el recuento completo:
+   ```
+   ✓  components  components/ui.test.tsx (4 tests)
+   ✓  components  components/rich-text.test.tsx (3 tests)
+    Test Files  11 passed (11)
+         Tests  63 passed (63)
+   ```
+   No son solo los 56 de `lib/`: el proyecto `components` también corre en el
+   runner.
+
+2. **Eliminar el paso «Install the test runner» no rompió nada** (R7/E7.2).
+   `npm ci` instaló 451 paquetes, vitest entre ellos, y `npm test` lo encontró.
+
+El job `dependency scan` —que no estaba en el análisis inicial— pasó. Confirma
+lo que dice la sección de fuera de alcance: las vulnerabilidades de vitest son
+de desarrollo y no bloquean la entrega.
+
 ---
 
 ## Requisitos
