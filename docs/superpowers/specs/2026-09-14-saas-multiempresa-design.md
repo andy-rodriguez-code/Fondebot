@@ -328,9 +328,21 @@ suelta sin tests.
 Ninguna bloquea el arranque. Se resuelven en la especificación del proyecto que
 las toca.
 
-1. **S0** — Cuando se apaga una empresa, ¿qué pasa con las conversaciones
-   abiertas? ¿Se congelan y siguen visibles, o el portal queda cerrado del todo?
-   Afecta la pantalla que ve su gente al intentar entrar.
+1. ~~**S0** — ¿Qué pasa con las conversaciones abiertas al apagar una
+   empresa?~~ **Resuelta (2026-09-14): el portal queda cerrado del todo.**
+   Apagar `is_active` cierra el acceso: el login del portal rechaza, el bot no
+   contesta en ningún canal, y su gente ve una pantalla de servicio suspendido
+   en vez de la bandeja.
+
+   Dos consecuencias que S0 tiene que cubrir, porque «cerrado del todo» no
+   puede significar «roto»:
+   - **Los datos no se tocan.** Conversaciones, contactos y conocimiento quedan
+     intactos. Suspender no es borrar; volver a prender el toggle devuelve todo
+     como estaba. Lo contrario convierte un atraso de pago en pérdida de datos,
+     y eso no se deshace con una disculpa.
+   - **Vos seguís viendo esa empresa** desde el lado de la agencia. El corte es
+     para ella, no para vos: si no, apagar a alguien te dejaría sin poder
+     revisar su caso justo cuando hay que negociar la deuda.
 2. **S2** — Si una empresa carga una clave inválida, ¿el bot cae en modo
    recepción o responde un error? El modo recepción parece mejor, pero hay que
    distinguir «clave mal escrita» de «sin saldo».
