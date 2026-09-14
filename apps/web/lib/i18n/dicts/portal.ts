@@ -3,6 +3,8 @@ const en = {
   loader: {
     loading: "Loading portal…",
     unavailable: "Portal not available",
+    suspendedTitle: "Service suspended",
+    suspendedBody: "This portal is suspended. Contact whoever arranged the service to have it restored.",
   },
   access: {
     secureBadge: "Secure client portal",
@@ -220,6 +222,8 @@ const es: typeof en = {
   loader: {
     loading: "Cargando portal…",
     unavailable: "Portal no disponible",
+    suspendedTitle: "Servicio suspendido",
+    suspendedBody: "Este portal está suspendido. Comunicate con quien contrató el servicio para reactivarlo.",
   },
   access: {
     secureBadge: "Portal seguro de cliente",
