@@ -83,3 +83,30 @@ class TestElPortalSeCierra:
 
         assert response.status_code == 200
 
+
+class TestElWidgetDejaDeAtender:
+    """El chat embebido en el sitio de la empresa deja de cargar. Un widget que
+    responde es un servicio que se está prestando."""
+
+    def test_la_configuracion_del_widget_no_se_entrega(self, authenticated_client: TestClient):
+        customer = _empresa_con_portal(authenticated_client)
+        agent = authenticated_client.post(
+            "/api/agents",
+            json={
+                "client_id": customer["id"],
+                "name": "Bot Panaderia",
+                "instructions": "Atende pedidos.",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+            },
+        ).json()
+        authenticated_client.patch(f"/api/agents/{agent['id']}", json={"widget_enabled": True})
+        public_id = authenticated_client.get(f"/api/agents/{agent['id']}").json()["widget_public_id"]
+
+        visitante = TestClient(authenticated_client.app)
+        assert visitante.get(f"/api/widget/{public_id}").status_code == 200
+
+        _suspender(authenticated_client, customer["id"])
+
+        assert visitante.get(f"/api/widget/{public_id}").status_code == 404
+
