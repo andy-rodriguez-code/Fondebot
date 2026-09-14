@@ -10,10 +10,13 @@ borre nada, y que el corte sea para la empresa y no para quien la administra.
 """
 
 import json
+import uuid
 
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
+from app.database import SessionLocal
+from app.models import Conversation
 from test_whatsapp_cloud import APP_SECRET, _setup_channel, _sign, _webhook_payload
 
 PASSWORD = "una-clave-de-prueba-larga"
@@ -240,4 +243,111 @@ class TestLaAppMobileSeCierra:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 401
+
+
+def _seed_conversation(*, agency_id, client_id: str, agent_id: str) -> uuid.UUID:
+    """Inserta una conversación directo, como test_dashboard.py: lo que se
+    prueba acá es que siga visible después de suspender, no cómo nace."""
+    with SessionLocal() as db:
+        conversation = Conversation(
+            agency_id=agency_id,
+            client_id=uuid.UUID(client_id),
+            agent_id=uuid.UUID(agent_id),
+            title="Caso de la panadería",
+            channel="whatsapp_cloud",
+        )
+        db.add(conversation)
+        db.commit()
+        return conversation.id
+
+
+class TestElDuenoNoPierdeAcceso:
+    """El corte es para la empresa, no para quien la administra.
+
+    Si suspender también te dejara a vos afuera, no podrías revisar su cuenta
+    justo cuando hay que hablar de la deuda. Y los datos tienen que seguir ahí:
+    suspender no es borrar.
+    """
+
+    def test_la_empresa_suspendida_sigue_en_el_listado(self, authenticated_client: TestClient):
+        customer = _empresa_con_portal(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+
+        listado = authenticated_client.get("/api/clients").json()
+
+        assert any(row["id"] == customer["id"] for row in listado)
+
+    def test_su_ficha_se_sigue_abriendo(self, authenticated_client: TestClient):
+        customer = _empresa_con_portal(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+
+        response = authenticated_client.get(f"/api/clients/{customer['id']}")
+
+        assert response.status_code == 200
+        assert response.json()["is_active"] is False
+
+    def test_su_gente_sigue_existiendo(self, authenticated_client: TestClient):
+        # Suspender no borra cuentas. Reactivar tiene que devolver el equipo
+        # completo, sin que nadie vuelva a cargar a mano quién trabajaba ahí.
+        customer = _empresa_con_portal(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+
+        gente = authenticated_client.get(f"/api/clients/{customer['id']}/portal-users").json()
+
+        assert [row["email"] for row in gente] == ["ada@panaderia.com"]
+
+    def test_sus_conversaciones_se_siguen_viendo_en_la_bandeja(self, authenticated_client: TestClient):
+        # Suspender no borra el historial: el dueño tiene que poder seguir
+        # leyendo lo que esa empresa ya conversó, aunque el servicio esté
+        # cortado.
+        customer = _empresa_con_portal(authenticated_client)
+        agent = authenticated_client.post(
+            "/api/agents",
+            json={
+                "client_id": customer["id"],
+                "name": "Bot Panaderia",
+                "instructions": "Atende pedidos.",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+            },
+        ).json()
+        agency_id = uuid.UUID(authenticated_client.get("/api/agency").json()["id"])
+        conversation_id = _seed_conversation(agency_id=agency_id, client_id=customer["id"], agent_id=agent["id"])
+
+        _suspender(authenticated_client, customer["id"])
+
+        bandeja = authenticated_client.get("/api/conversations/inbox").json()
+        assert any(row["id"] == str(conversation_id) for row in bandeja)
+
+    def test_reactivar_devuelve_el_servicio_completo(self, authenticated_client: TestClient):
+        # No alcanza con que el login vuelva a andar (ya lo cubre
+        # TestElPortalSeCierra): reactivar tiene que devolver también el acceso
+        # a lo que esa gente ya tenía, no solo la puerta de entrada.
+        customer = _empresa_con_portal(authenticated_client)
+        agent = authenticated_client.post(
+            "/api/agents",
+            json={
+                "client_id": customer["id"],
+                "name": "Bot Panaderia",
+                "instructions": "Atende pedidos.",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+            },
+        ).json()
+        agency_id = uuid.UUID(authenticated_client.get("/api/agency").json()["id"])
+        _seed_conversation(agency_id=agency_id, client_id=customer["id"], agent_id=agent["id"])
+
+        _suspender(authenticated_client, customer["id"])
+        _reactivar(authenticated_client, customer["id"])
+
+        portal = TestClient(authenticated_client.app)
+        login = portal.post(
+            f"/api/portal/{customer['portal_slug']}/login",
+            json={"email": "ada@panaderia.com", "password": PASSWORD},
+        )
+        assert login.status_code == 200
+
+        conversaciones = portal.get(f"/api/portal/{customer['portal_slug']}/conversations")
+        assert conversaciones.status_code == 200
+        assert len(conversaciones.json()) == 1
 
