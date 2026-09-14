@@ -1,0 +1,22 @@
+change: web-test-harness
+created: 2026-09-13
+artifact_store: hybrid
+execution_mode: interactive
+delivery_strategy: ask-on-risk
+review_budget_lines: 400
+
+phases:
+  explore: done
+  research: not-selected
+  proposal: done
+  spec: done
+  design: done
+  tasks: done
+  apply: done
+  verify: done
+  archive: pending
+
+next_recommended: archive
+
+source: AUDITORIA-WEB.md
+roadmap: openspec/changes/README.md
