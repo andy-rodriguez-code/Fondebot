@@ -146,7 +146,21 @@ Tres huecos sobre la maquinaria del punto 3.1:
    ```
    Una constante de módulo. La panadería y la clínica saludan idéntico. En un
    producto cuyo argumento de venta es la marca propia, eso no cierra.
-3. **Sin dependencias y sin clave, silencio.** Nadie saluda, en ningún canal.
+3. **Sin dependencias y sin clave, el contacto no recibe nada.** Acá hay que
+   ser preciso, porque la primera redacción de este documento era injusta con
+   el código: en WhatsApp **sí** pasa algo, y está bien hecho
+   (`whatsapp_inbound.py:379-405`). Cuando el agente no puede contestar, el
+   caso pasa a modo humano, se anota el motivo en el canal, se avisa en vivo a
+   la dependencia y **suena una notificación**. El comentario de esa función
+   dice exactamente lo que se pidió en la sesión de diseño:
+
+   > *«El bot es una opción, no un requisito. El menú de dependencias y el
+   > ruteo funcionan sin IA —son código, no un modelo—, así que cuando el
+   > agente no puede contestar el caso tiene que pasar a una PERSONA en lugar
+   > de quedarse esperando una respuesta que no va a llegar.»*
+
+   Lo que falta es solo la mitad de cara al contacto: nadie le dice nada
+   mientras espera. Internamente el traspaso ya funciona.
 
 ### 4.3 La credencial de IA es por agencia, no por empresa
 
@@ -278,8 +292,11 @@ Requisitos concretos:
 - **R-REC-3.** No hay silencio en ningún canal. Si no hay clave y no hay
   dependencias, el contacto igual recibe una respuesta —configurable— que le
   dice que alguien lo va a atender.
-- **R-REC-4.** El estado del bot es visible para la empresa y para vos: «listo»,
-  «modo recepción», «falta la clave».
+**R-REC-4 se movió a S2.** Decía que el estado del bot —«listo», «modo
+recepción», «falta la clave»— tiene que ser visible. Pertenece al proyecto de
+la credencial, no a este: hasta que exista la clave por empresa, «falta la
+clave» no es un estado que la empresa pueda resolver sola, y mostrarlo sin
+darle dónde cargarla es señalar un problema sin la puerta al lado.
 
 ---
 
