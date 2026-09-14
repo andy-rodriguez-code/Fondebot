@@ -36,3 +36,50 @@ def _reactivar(admin: TestClient, client_id: str) -> None:
     response = admin.patch(f"/api/clients/{client_id}", json={"is_active": True})
     assert response.status_code == 200, response.text
 
+
+class TestElPortalSeCierra:
+    """Suspendida, su gente no entra: ni con credenciales correctas, ni con la
+    sesión que ya tenía abierta."""
+
+    def test_el_login_se_rechaza(self, authenticated_client: TestClient):
+        customer = _empresa_con_portal(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+
+        portal = TestClient(authenticated_client.app)
+        response = portal.post(
+            f"/api/portal/{customer['portal_slug']}/login",
+            json={"email": "ada@panaderia.com", "password": PASSWORD},
+        )
+
+        assert response.status_code == 403
+        assert "suspend" in response.json()["detail"].lower()
+
+    def test_una_sesion_ya_abierta_deja_de_servir(self, authenticated_client: TestClient):
+        # La sesión se abre ANTES de suspender: es el caso real, alguien
+        # trabajando cuando se corta el servicio.
+        customer = _empresa_con_portal(authenticated_client)
+        portal = TestClient(authenticated_client.app)
+        assert portal.post(
+            f"/api/portal/{customer['portal_slug']}/login",
+            json={"email": "ada@panaderia.com", "password": PASSWORD},
+        ).status_code == 200
+
+        _suspender(authenticated_client, customer["id"])
+
+        response = portal.get(f"/api/portal/{customer['portal_slug']}/conversations")
+        assert response.status_code == 403
+
+    def test_reactivar_devuelve_el_acceso(self, authenticated_client: TestClient):
+        # Suspender no borra: es lo que separa "te cortamos" de "te perdimos".
+        customer = _empresa_con_portal(authenticated_client)
+        _suspender(authenticated_client, customer["id"])
+        _reactivar(authenticated_client, customer["id"])
+
+        portal = TestClient(authenticated_client.app)
+        response = portal.post(
+            f"/api/portal/{customer['portal_slug']}/login",
+            json={"email": "ada@panaderia.com", "password": PASSWORD},
+        )
+
+        assert response.status_code == 200
+
