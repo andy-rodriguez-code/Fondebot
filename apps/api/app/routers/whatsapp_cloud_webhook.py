@@ -118,6 +118,12 @@ async def receive_webhook(channel_id: uuid.UUID, request: Request, db: Session =
         return {"status": "ok"}
     if not channel.is_enabled:
         return {"status": "ok"}
+    if not channel.client.is_active:
+        # 200 y descartar, al revés que en el puente Baileys, que recibe 409.
+        # Meta reintenta todo lo que no sea 2xx, así que un rechazo acá
+        # convierte a una empresa suspendida en tráfico infinito. El mensaje se
+        # pierde a propósito: no hay a quién entregárselo.
+        return {"status": "ignored"}
 
     access_token = decrypt_secret(channel.encrypted_access_token) if channel.encrypted_access_token else None
     for entry in payload.get("entry") or []:

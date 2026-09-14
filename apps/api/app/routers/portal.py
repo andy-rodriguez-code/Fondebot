@@ -66,6 +66,11 @@ def _public_client(db: Session, slug: str) -> Client:
     client = db.scalar(select(Client).where(Client.portal_slug == slug, Client.portal_enabled.is_(True)))
     if not client:
         raise HTTPException(status_code=404, detail="Portal not found or disabled")
+    # 403 y no 404: el portal existe y su gente lo conoce. Decirle "no existe"
+    # a quien lo viene usando hace diez meses manda a revisar la URL en vez de
+    # llamar a quien factura. El 404 queda para el slug que de verdad no está.
+    if not client.is_active:
+        raise HTTPException(status_code=403, detail="This portal is suspended")
     return client
 
 
@@ -93,6 +98,8 @@ def _portal_client(
     client = db.scalar(select(Client).where(Client.id == client_id, Client.portal_slug == slug, Client.portal_enabled.is_(True)))
     if not client:
         raise HTTPException(status_code=401, detail="The portal is no longer available")
+    if not client.is_active:
+        raise HTTPException(status_code=403, detail="This portal is suspended")
     return client
 
 

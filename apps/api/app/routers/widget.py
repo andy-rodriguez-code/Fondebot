@@ -51,7 +51,12 @@ def _agent(db: Session, public_id: str) -> Agent:
         .options(joinedload(Agent.client))
         .where(Agent.widget_public_id == public_id, Agent.widget_enabled.is_(True))
     )
-    if not agent:
+    # 404 y no 403, al revés que en el portal: acá quien pregunta es un
+    # visitante del sitio de la empresa, no la empresa. No tiene por qué
+    # enterarse de que hay una cuenta suspendida detrás — para él, el chat
+    # simplemente no está. El `joinedload` de arriba ya trajo al cliente, así
+    # que esto no agrega una consulta.
+    if not agent or not agent.client.is_active:
         raise HTTPException(status_code=404, detail="Widget not found")
     return agent
 
